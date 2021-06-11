@@ -20,7 +20,9 @@ import Graphql.SelectionSet exposing (SelectionSet)
 import Json.Decode as Decode
 
 
-claims : SelectionSet decodesTo Cambiatus.Object.Claim -> SelectionSet (List decodesTo) Cambiatus.Object.Action
+claims :
+    SelectionSet decodesTo Cambiatus.Object.Claim
+    -> SelectionSet (List decodesTo) Cambiatus.Object.Action
 claims object_ =
     Object.selectionForCompositeField "claims" [] object_ (identity >> Decode.list)
 
@@ -45,7 +47,9 @@ createdTx =
     Object.selectionForField "String" "createdTx" [] Decode.string
 
 
-creator : SelectionSet decodesTo Cambiatus.Object.Profile -> SelectionSet decodesTo Cambiatus.Object.Action
+creator :
+    SelectionSet decodesTo Cambiatus.Object.User
+    -> SelectionSet decodesTo Cambiatus.Object.Action
 creator object_ =
     Object.selectionForCompositeField "creator" [] object_ identity
 
@@ -65,6 +69,16 @@ description =
     Object.selectionForField "String" "description" [] Decode.string
 
 
+hasProofCode : SelectionSet (Maybe Bool) Cambiatus.Object.Action
+hasProofCode =
+    Object.selectionForField "(Maybe Bool)" "hasProofCode" [] (Decode.bool |> Decode.nullable)
+
+
+hasProofPhoto : SelectionSet (Maybe Bool) Cambiatus.Object.Action
+hasProofPhoto =
+    Object.selectionForField "(Maybe Bool)" "hasProofPhoto" [] (Decode.bool |> Decode.nullable)
+
+
 id : SelectionSet Int Cambiatus.Object.Action
 id =
     Object.selectionForField "Int" "id" [] Decode.int
@@ -75,9 +89,21 @@ isCompleted =
     Object.selectionForField "Bool" "isCompleted" [] Decode.bool
 
 
-objective : SelectionSet decodesTo Cambiatus.Object.Objective -> SelectionSet decodesTo Cambiatus.Object.Action
+objective :
+    SelectionSet decodesTo Cambiatus.Object.Objective
+    -> SelectionSet decodesTo Cambiatus.Object.Action
 objective object_ =
     Object.selectionForCompositeField "objective" [] object_ identity
+
+
+photoProofInstructions : SelectionSet (Maybe String) Cambiatus.Object.Action
+photoProofInstructions =
+    Object.selectionForField "(Maybe String)" "photoProofInstructions" [] (Decode.string |> Decode.nullable)
+
+
+position : SelectionSet (Maybe Int) Cambiatus.Object.Action
+position =
+    Object.selectionForField "(Maybe Int)" "position" [] (Decode.int |> Decode.nullable)
 
 
 reward : SelectionSet Float Cambiatus.Object.Action
@@ -95,7 +121,9 @@ usagesLeft =
     Object.selectionForField "Int" "usagesLeft" [] Decode.int
 
 
-validators : SelectionSet decodesTo Cambiatus.Object.Profile -> SelectionSet (List decodesTo) Cambiatus.Object.Action
+validators :
+    SelectionSet decodesTo Cambiatus.Object.User
+    -> SelectionSet (List decodesTo) Cambiatus.Object.Action
 validators object_ =
     Object.selectionForCompositeField "validators" [] object_ (identity >> Decode.list)
 

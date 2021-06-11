@@ -1,86 +1,55 @@
 module Transfer exposing
     ( ConnectionTransfer
+    , EdgeTransfer
     , QueryTransfers
     , Transfer
-    , communityFilter
     , encodeEosActionData
-    , getTotalCount
     , getTransfers
-    , metadataConnectionSelectionSet
     , transferConnectionSelectionSet
-    , transferItemSelectionSet
     , transferQuery
-    , transfersQuery
-    , userFilter
+    , transferSucceedSubscription
+    , transfersUserQuery
     )
 
-import Api.Relay exposing (Edge, MetadataConnection, PageConnection, PageInfo, PaginationArgs, pageInfoSelectionSet)
-import Avatar exposing (Avatar)
+import Api.Relay exposing (Edge, PageConnection, pageInfoSelectionSet)
 import Cambiatus.Object
 import Cambiatus.Object.Community
-import Cambiatus.Object.Profile
+import Cambiatus.Object.Subdomain
 import Cambiatus.Object.Transfer
 import Cambiatus.Object.TransferConnection
 import Cambiatus.Object.TransferEdge
+import Cambiatus.Object.User as User
 import Cambiatus.Query
 import Cambiatus.Scalar exposing (DateTime(..))
-import Eos exposing (Symbol)
+import Cambiatus.Subscription as Subscription
+import Eos exposing (symbolToString)
 import Eos.Account as Eos
 import Graphql.Operation exposing (RootQuery)
-import Graphql.OptionalArgument exposing (OptionalArgument(..))
 import Graphql.SelectionSet as SelectionSet exposing (SelectionSet, with)
 import Json.Encode as Encode exposing (Value)
-import Profile exposing (Profile)
-
-
-type TransferFilter
-    = RegularUser Eos.Name
-    | Community Symbol
-
-
-userFilter : Eos.Name -> TransferFilter
-userFilter name =
-    RegularUser name
-
-
-communityFilter : Symbol -> TransferFilter
-communityFilter sym =
-    Community sym
-
-
-type alias ProfileArgs =
-    { input :
-        { account : OptionalArgument String
-        }
-    }
-
-
-type alias CommunityArgs =
-    { symbol : OptionalArgument String
-    }
+import Profile
 
 
 type alias Transfer =
     { id : Int
-    , to : Profile
-    , from : Profile
+    , to : Profile.Model
+    , from : Profile.Model
     , value : Float
     , memo : Maybe String
-    , symbol : Symbol
+    , communityId : CommunityId
     , community : Cmm
     , blockTime : DateTime
+    , createdTx : String
     }
 
 
-type alias TransferUser =
-    { avatar : Avatar
-    , userName : Maybe String
-    , account : Eos.Name
-    }
+type alias CommunityId =
+    String
 
 
 type alias Cmm =
-    { name : String
+    { symbol : Eos.Symbol
+    , subdomain : String
     }
 
 
@@ -119,11 +88,6 @@ encodeEosActionData data =
 -- GRAPHQL API
 
 
-profileNameSelectionSet : SelectionSet (Maybe String) typeLock -> SelectionSet (Maybe String) typeLock
-profileNameSelectionSet =
-    SelectionSet.map (\t -> t)
-
-
 transferItemSelectionSet : SelectionSet Transfer Cambiatus.Object.Transfer
 transferItemSelectionSet =
     SelectionSet.succeed Transfer
@@ -132,14 +96,23 @@ transferItemSelectionSet =
         |> with (Cambiatus.Object.Transfer.from Profile.selectionSet)
         |> with Cambiatus.Object.Transfer.amount
         |> with Cambiatus.Object.Transfer.memo
-        |> with (Eos.symbolSelectionSet Cambiatus.Object.Transfer.communityId)
         |> with
             (Cambiatus.Object.Transfer.community
-                (SelectionSet.succeed Cmm
-                    |> with Cambiatus.Object.Community.name
-                )
+                Cambiatus.Object.Community.name
             )
+        |> with (Cambiatus.Object.Transfer.community communitySelectionSet)
         |> with Cambiatus.Object.Transfer.createdAt
+        |> with Cambiatus.Object.Transfer.createdTx
+
+
+communitySelectionSet : SelectionSet Cmm Cambiatus.Object.Community
+communitySelectionSet =
+    SelectionSet.succeed Cmm
+        |> with (Eos.symbolSelectionSet Cambiatus.Object.Community.symbol)
+        |> with
+            (Cambiatus.Object.Community.subdomain Cambiatus.Object.Subdomain.name
+                |> SelectionSet.map (Maybe.withDefault "")
+            )
 
 
 transferEdgeSelectionSet : SelectionSet EdgeTransfer Cambiatus.Object.TransferEdge
@@ -156,18 +129,11 @@ transferConnectionSelectionSet =
         |> with (Cambiatus.Object.TransferConnection.pageInfo pageInfoSelectionSet)
 
 
-metadataConnectionSelectionSet : SelectionSet MetadataConnection Cambiatus.Object.TransferConnection
-metadataConnectionSelectionSet =
-    SelectionSet.succeed MetadataConnection
-        |> with Cambiatus.Object.TransferConnection.totalCount
-        |> with Cambiatus.Object.TransferConnection.fetchedCount
-
-
-profileTransfersSelectionSet : (PaginationArgs -> PaginationArgs) -> SelectionSet QueryTransfers Cambiatus.Object.Profile
+profileTransfersSelectionSet : (User.TransfersOptionalArguments -> User.TransfersOptionalArguments) -> SelectionSet QueryTransfers Cambiatus.Object.User
 profileTransfersSelectionSet paginateArgs =
     let
         transfers =
-            Cambiatus.Object.Profile.transfers
+            User.transfers
                 paginateArgs
                 transferConnectionSelectionSet
     in
@@ -175,28 +141,10 @@ profileTransfersSelectionSet paginateArgs =
         |> with transfers
 
 
-communityTransfersSelectionSet : (PaginationArgs -> PaginationArgs) -> SelectionSet QueryTransfers Cambiatus.Object.Community
-communityTransfersSelectionSet paginateArgs =
-    let
-        transfers =
-            Cambiatus.Object.Community.transfers
-                paginateArgs
-                transferConnectionSelectionSet
-    in
-    SelectionSet.succeed QueryTransfers
-        |> with transfers
-
-
-transfersQuery : TransferFilter -> (PaginationArgs -> PaginationArgs) -> SelectionSet (Maybe QueryTransfers) RootQuery
-transfersQuery input paginateArgs =
-    case input of
-        RegularUser name ->
-            profileTransfersSelectionSet paginateArgs
-                |> Cambiatus.Query.profile { input = { account = Present (Eos.nameToString name) } }
-
-        Community symbol ->
-            communityTransfersSelectionSet paginateArgs
-                |> Cambiatus.Query.community { symbol = Eos.symbolToString symbol }
+transfersUserQuery : Eos.Name -> (User.TransfersOptionalArguments -> User.TransfersOptionalArguments) -> SelectionSet (Maybe QueryTransfers) RootQuery
+transfersUserQuery name paginateArgs =
+    profileTransfersSelectionSet paginateArgs
+        |> Cambiatus.Query.user { account = Eos.nameToString name }
 
 
 getTransfers : Maybe { t | transfers : Maybe ConnectionTransfer } -> List Transfer
@@ -222,15 +170,7 @@ getTransfers maybeObj =
 
         toMaybeNodes : List (Maybe EdgeTransfer) -> List (Maybe Transfer)
         toMaybeNodes edges =
-            List.map
-                (\a ->
-                    Maybe.andThen
-                        (\b ->
-                            b.node
-                        )
-                        a
-                )
-                edges
+            List.map (\a -> Maybe.andThen (\b -> b.node) a) edges
 
         toNodes : List (Maybe Transfer) -> List Transfer
         toNodes maybeNodes =
@@ -246,35 +186,24 @@ getTransfers maybeObj =
         |> toNodes
 
 
-getTotalCount : Maybe { t | transfers : Maybe MetadataConnection } -> Maybe Int
-getTotalCount maybeObj =
-    let
-        toMaybeConn : Maybe { t | transfers : Maybe MetadataConnection } -> Maybe MetadataConnection
-        toMaybeConn maybeObj_ =
-            Maybe.andThen
-                (\obj ->
-                    obj.transfers
-                )
-                maybeObj_
-
-        toMaybeTotal : Maybe MetadataConnection -> Maybe Int
-        toMaybeTotal maybeConn =
-            case maybeConn of
-                Just conn ->
-                    conn.totalCount
-
-                Nothing ->
-                    Nothing
-    in
-    maybeObj
-        |> toMaybeConn
-        |> toMaybeTotal
-
-
 transferQuery : Int -> SelectionSet (Maybe Transfer) RootQuery
 transferQuery tID =
     let
         args =
-            { input = { id = tID } }
+            { id = tID }
     in
     Cambiatus.Query.transfer args transferItemSelectionSet
+
+
+transferSucceedSubscription : Eos.Symbol -> String -> String -> SelectionSet Transfer Graphql.Operation.RootSubscription
+transferSucceedSubscription symbol fromAccount toAccount =
+    let
+        args =
+            { input =
+                { from = fromAccount
+                , to = toAccount
+                , symbol = symbolToString symbol |> String.toUpper
+                }
+            }
+    in
+    Subscription.transfersucceed args transferItemSelectionSet

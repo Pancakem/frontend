@@ -1,42 +1,56 @@
 module Main exposing (main)
 
-import Api
-import Auth
-import Browser
+import Browser exposing (Document)
 import Browser.Navigation as Nav
-import Community
+import Eos.Account
 import Flags
-import Html exposing (Html, div, iframe, text)
-import Html.Attributes exposing (id, style)
-import Http
+import Html exposing (Html, text)
 import Json.Decode as Decode exposing (Value)
 import Log
 import Page exposing (Session)
 import Page.ComingSoon as ComingSoon
-import Page.Community as Community
+import Page.Community as CommunityPage
 import Page.Community.ActionEditor as ActionEditor
-import Page.Community.Editor as CommunityEditor
-import Page.Community.Explore as CommunityExplore
+import Page.Community.Invite as Invite
+import Page.Community.New as CommunityEditor
 import Page.Community.ObjectiveEditor as ObjectiveEditor
 import Page.Community.Objectives as Objectives
-import Page.Community.VerifyClaim as VerifyClaim
+import Page.Community.Selector as CommunitySelector
+import Page.Community.Settings.Currency as CommunitySettingsCurrency
+import Page.Community.Settings.Features as CommunitySettingsFeatures
+import Page.Community.Settings.Info as CommunitySettingsInfo
+import Page.Community.Settings.Settings as CommunitySettings
+import Page.Community.Transfer as Transfer
 import Page.Dashboard as Dashboard
+import Page.Dashboard.Analysis as Analysis
+import Page.Dashboard.Claim as Claim
+import Page.Join as Join
 import Page.Login as Login
 import Page.NotFound as NotFound
 import Page.Notification as Notification
+import Page.PaymentHistory as PaymentHistory
 import Page.Profile as Profile
+import Page.Profile.AddContact as ProfileAddContact
+import Page.Profile.AddKyc as ProfileAddKyc
+import Page.Profile.Claims as ProfileClaims
+import Page.Profile.Editor as ProfileEditor
+import Page.Profile.Public as ProfilePublic
 import Page.Register as Register
 import Page.Shop as Shop
 import Page.Shop.Editor as ShopEditor
 import Page.Shop.Viewer as ShopViewer
-import Page.Transfer as Transfer
+import Page.ViewTransfer as ViewTransfer
 import Ports
+import RemoteData
 import Route exposing (Route)
 import Session.Guest as Guest
 import Session.LoggedIn as LoggedIn
 import Shop
+import Task
+import Time
 import UpdateResult as UR exposing (UpdateResult)
 import Url exposing (Url)
+import View.Feedback as Feedback
 
 
 main : Program Value Model Msg
@@ -45,14 +59,7 @@ main =
         { init = init
         , subscriptions = subscriptions
         , update = update
-        , view =
-            \model ->
-                { title = "Cambiatus"
-                , body =
-                    [ view model
-                    , viewChat
-                    ]
-                }
+        , view = view
         , onUrlRequest = ClickedLink
         , onUrlChange = ChangedUrl
         }
@@ -68,12 +75,12 @@ init flagsValue url navKey =
         ( session, pageCmd ) =
             case Decode.decodeValue Flags.decode flagsValue of
                 Ok flags ->
-                    Page.init flags navKey
+                    Page.init flags navKey url
                         |> UR.map identity GotPageMsg (\_ uR -> uR)
                         |> UR.toModelCmd (\_ m -> ( m, Cmd.none )) msgToString
 
                 Err e ->
-                    Page.init Flags.default navKey
+                    Page.init Flags.default navKey url
                         |> UR.map identity GotPageMsg (\_ uR -> uR)
                         |> UR.logDecodeError Ignored e
                         |> UR.toModelCmd (\_ m -> ( m, Cmd.none )) msgToString
@@ -103,20 +110,8 @@ subscriptions model =
         [ Sub.map GotPageMsg (Page.subscriptions model.session)
         , Ports.javascriptInPort GotJavascriptData
         , case model.status of
-            Login subModel ->
-                Login.subscriptions subModel
-                    |> Sub.map GotLoginMsg
-
-            Dashboard subModel ->
-                Dashboard.subscriptions subModel
-                    |> Sub.map GotDashboardMsg
-
-            Register _ subModel ->
-                Register.subscriptions subModel
-                    |> Sub.map GotRegisterMsg
-
             Community subModel ->
-                Community.subscriptions subModel
+                CommunityPage.subscriptions subModel
                     |> Sub.map GotCommunityMsg
 
             CommunityEditor subModel ->
@@ -151,22 +146,36 @@ type Status
     = Redirect
     | NotFound
     | ComingSoon
-    | Community Community.Model
+    | PaymentHistory PaymentHistory.Model
+    | Community CommunityPage.Model
     | CommunityEditor CommunityEditor.Model
+    | CommunitySettings CommunitySettings.Model
+    | CommunitySettingsFeatures CommunitySettingsFeatures.Model
+    | CommunitySettingsInfo CommunitySettingsInfo.Model
+    | CommunitySettingsCurrency CommunitySettingsCurrency.Model
+    | CommunitySelector CommunitySelector.Model
     | Objectives Objectives.Model
     | ObjectiveEditor ObjectiveEditor.Model
     | ActionEditor ActionEditor.Model
-    | VerifyClaim VerifyClaim.Model
-    | CommunityExplore CommunityExplore.Model
+    | Claim Int Int Claim.Model
     | Notification Notification.Model
     | Dashboard Dashboard.Model
-    | Login Login.Model
+    | Login (Maybe Route) Login.Model
     | Profile Profile.Model
-    | Register (Maybe String) Register.Model
+    | ProfilePublic String ProfilePublic.Model
+    | ProfileEditor ProfileEditor.Model
+    | ProfileAddKyc ProfileAddKyc.Model
+    | ProfileClaims ProfileClaims.Model
+    | ProfileAddContact ProfileAddContact.Model
+    | Register (Maybe String) (Maybe Route) Register.Model
     | Shop Shop.Filter Shop.Model
     | ShopEditor (Maybe String) ShopEditor.Model
     | ShopViewer String ShopViewer.Model
-    | Transfer Int Transfer.Model
+    | ViewTransfer Int ViewTransfer.Model
+    | Invite Invite.Model
+    | Join Join.Model
+    | Transfer Transfer.Model
+    | Analysis Analysis.Model
 
 
 
@@ -175,28 +184,39 @@ type Status
 
 type Msg
     = Ignored
-    | ChangedRoute (Maybe Route)
     | ChangedUrl Url
     | ClickedLink Browser.UrlRequest
     | GotJavascriptData Value
     | GotPageMsg Page.Msg
     | GotNotificationMsg Notification.Msg
-    | GotCommunityMsg Community.Msg
+    | GotCommunityMsg CommunityPage.Msg
     | GotCommunityEditorMsg CommunityEditor.Msg
+    | GotCommunitySettingsMsg CommunitySettings.Msg
+    | GotCommunitySettingsFeaturesMsg CommunitySettingsFeatures.Msg
+    | GotCommunitySettingsInfoMsg CommunitySettingsInfo.Msg
+    | GotCommunitySettingsCurrencyMsg CommunitySettingsCurrency.Msg
     | GotObjectivesMsg Objectives.Msg
     | GotActionEditorMsg ActionEditor.Msg
     | GotObjectiveEditorMsg ObjectiveEditor.Msg
-    | GotVerifyClaimMsg VerifyClaim.Msg
-    | GotCommunityExploreMsg CommunityExplore.Msg
+    | GotVerifyClaimMsg Claim.Msg
     | GotDashboardMsg Dashboard.Msg
     | GotLoginMsg Login.Msg
+    | GotPaymentHistoryMsg PaymentHistory.Msg
     | GotProfileMsg Profile.Msg
+    | GotProfilePublicMsg ProfilePublic.Msg
+    | GotProfileEditorMsg ProfileEditor.Msg
+    | GotProfileAddKycMsg ProfileAddKyc.Msg
+    | GotProfileClaimsMsg ProfileClaims.Msg
+    | GotProfileAddContactMsg ProfileAddContact.Msg
     | GotRegisterMsg Register.Msg
     | GotShopMsg Shop.Msg
     | GotShopEditorMsg ShopEditor.Msg
-    | GotUpdatedBalances (Result Http.Error (List Community.Balance))
     | GotShopViewerMsg ShopViewer.Msg
-    | GotTransferScreenMsg Transfer.Msg
+    | GotViewTransferScreenMsg ViewTransfer.Msg
+    | GotInviteMsg Invite.Msg
+    | GotJoinMsg Join.Msg
+    | GotTransferMsg Transfer.Msg
+    | GotAnalysisMsg Analysis.Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -226,21 +246,18 @@ update msg model =
         ( Ignored, _ ) ->
             ( model, Cmd.none )
 
-        ( ChangedRoute route, _ ) ->
-            changeRouteTo route model
-
         ( ChangedUrl url, _ ) ->
             changeRouteTo (Route.fromUrl url) model
 
         ( ClickedLink urlRequest, _ ) ->
             case urlRequest of
                 Browser.Internal url ->
-                    ( model
+                    ( model |> hideFeedback
                     , Nav.pushUrl (.navKey (Page.toShared model.session)) (Url.toString url)
                     )
 
                 Browser.External href ->
-                    ( model
+                    ( model |> hideFeedback
                     , Nav.load href
                     )
 
@@ -289,28 +306,36 @@ update msg model =
                                     Just aMsg ->
                                         update aMsg { m | afterAuthMsg = Nothing }
 
-                            Page.LoggedInExternalMsg LoggedIn.AuthenticationFailed ->
-                                ( { m | afterAuthMsg = Nothing }, Cmd.none )
+                            Page.LoggedInExternalMsg (LoggedIn.Broadcast broadcastMsg) ->
+                                ( m, broadcast broadcastMsg m.status )
+
+                            Page.GuestBroadcastMsg broadcastMsg ->
+                                ( m, broadcastGuest broadcastMsg m.status )
                     )
                     msgToString
 
-        ( GotRegisterMsg subMsg, Register maybeInvitation subModel ) ->
+        ( GotRegisterMsg subMsg, Register maybeInvitation maybeRedirect subModel ) ->
             -- Will return  a function expecting a Guest Model
             Register.update maybeInvitation subMsg subModel
                 -- will return a function expecting an UpdateResult
                 -- The composition operator will take the result of the above function and use as
                 -- an input for the below function
-                >> updateGuestUResult (Register maybeInvitation) GotRegisterMsg model
+                >> updateGuestUResult (Register maybeInvitation maybeRedirect) GotRegisterMsg model
                 -- provides the above composed function with the initial guest input
                 |> withGuest
 
-        ( GotLoginMsg subMsg, Login subModel ) ->
+        ( GotPaymentHistoryMsg subMsg, PaymentHistory subModel ) ->
+            PaymentHistory.update subMsg subModel
+                >> updateLoggedInUResult PaymentHistory GotPaymentHistoryMsg model
+                |> withLoggedIn
+
+        ( GotLoginMsg subMsg, Login maybeRedirect subModel ) ->
             Login.update subMsg subModel
-                >> updateGuestUResult Login GotLoginMsg model
+                >> updateGuestUResult (Login maybeRedirect) GotLoginMsg model
                 |> withGuest
 
         ( GotNotificationMsg subMsg, Notification subModel ) ->
-            -- Will return afunction expecting a LoggedIn Model
+            -- Will return a function expecting a LoggedIn Model
             Notification.update subMsg subModel
                 -- will return a function expecting an UpdateResult
                 -- The composition operator will take the result of the above function and use as
@@ -320,7 +345,7 @@ update msg model =
                 |> withLoggedIn
 
         ( GotCommunityMsg subMsg, Community subModel ) ->
-            Community.update subMsg subModel
+            CommunityPage.update subMsg subModel
                 >> updateLoggedInUResult Community GotCommunityMsg model
                 |> withLoggedIn
 
@@ -339,19 +364,59 @@ update msg model =
                 >> updateLoggedInUResult ObjectiveEditor GotObjectiveEditorMsg model
                 |> withLoggedIn
 
-        ( GotCommunityExploreMsg subMsg, CommunityExplore subModel ) ->
-            CommunityExplore.update subMsg subModel
-                >> updateLoggedInUResult CommunityExplore GotCommunityExploreMsg model
-                |> withLoggedIn
-
         ( GotDashboardMsg subMsg, Dashboard subModel ) ->
             Dashboard.update subMsg subModel
                 >> updateLoggedInUResult Dashboard GotDashboardMsg model
                 |> withLoggedIn
 
+        ( GotProfilePublicMsg subMsg, ProfilePublic profileName subModel ) ->
+            ProfilePublic.update subMsg subModel
+                >> updateLoggedInUResult (ProfilePublic profileName) GotProfilePublicMsg model
+                |> withLoggedIn
+
         ( GotProfileMsg subMsg, Profile subModel ) ->
             Profile.update subMsg subModel
                 >> updateLoggedInUResult Profile GotProfileMsg model
+                |> withLoggedIn
+
+        ( GotProfileEditorMsg subMsg, ProfileEditor subModel ) ->
+            ProfileEditor.update subMsg subModel
+                >> updateLoggedInUResult ProfileEditor GotProfileEditorMsg model
+                |> withLoggedIn
+
+        ( GotProfileAddKycMsg subMsg, ProfileAddKyc subModel ) ->
+            ProfileAddKyc.update subMsg subModel
+                >> updateLoggedInUResult ProfileAddKyc GotProfileAddKycMsg model
+                |> withLoggedIn
+
+        ( GotProfileClaimsMsg subMsg, ProfileClaims subModel ) ->
+            ProfileClaims.update subMsg subModel
+                >> updateLoggedInUResult ProfileClaims GotProfileClaimsMsg model
+                |> withLoggedIn
+
+        ( GotProfileAddContactMsg subMsg, ProfileAddContact subModel ) ->
+            ProfileAddContact.update subMsg subModel
+                >> updateLoggedInUResult ProfileAddContact GotProfileAddContactMsg model
+                |> withLoggedIn
+
+        ( GotCommunitySettingsMsg subMsg, CommunitySettings subModel ) ->
+            CommunitySettings.update subMsg subModel
+                >> updateLoggedInUResult CommunitySettings GotCommunitySettingsMsg model
+                |> withLoggedIn
+
+        ( GotCommunitySettingsFeaturesMsg subMsg, CommunitySettingsFeatures subModel ) ->
+            CommunitySettingsFeatures.update subMsg subModel
+                >> updateLoggedInUResult CommunitySettingsFeatures GotCommunitySettingsFeaturesMsg model
+                |> withLoggedIn
+
+        ( GotCommunitySettingsInfoMsg subMsg, CommunitySettingsInfo subModel ) ->
+            CommunitySettingsInfo.update subMsg subModel
+                >> updateLoggedInUResult CommunitySettingsInfo GotCommunitySettingsInfoMsg model
+                |> withLoggedIn
+
+        ( GotCommunitySettingsCurrencyMsg subMsg, CommunitySettingsCurrency subModel ) ->
+            CommunitySettingsCurrency.update subMsg subModel
+                >> updateLoggedInUResult CommunitySettingsCurrency GotCommunitySettingsCurrencyMsg model
                 |> withLoggedIn
 
         ( GotShopMsg subMsg, Shop maybeFilter subModel ) ->
@@ -364,26 +429,6 @@ update msg model =
                 >> updateLoggedInUResult (ShopEditor id) GotShopEditorMsg model
                 |> withLoggedIn
 
-        ( GotUpdatedBalances (Ok bals), _ ) ->
-            case model.session of
-                Page.LoggedIn session ->
-                    let
-                        new_session =
-                            { session | balances = bals }
-
-                        new_model =
-                            { model | session = Page.LoggedIn new_session }
-                    in
-                    ( new_model, Cmd.none )
-
-                _ ->
-                    ( model, Cmd.none )
-
-        ( GotUpdatedBalances (Err err), _ ) ->
-            ( model
-            , Log.httpError err
-            )
-
         ( GotShopViewerMsg subMsg, ShopViewer saleId subModel ) ->
             ShopViewer.update subMsg subModel
                 >> updateLoggedInUResult (ShopViewer saleId) GotShopViewerMsg model
@@ -394,20 +439,144 @@ update msg model =
                 >> updateLoggedInUResult ActionEditor GotActionEditorMsg model
                 |> withLoggedIn
 
-        ( GotVerifyClaimMsg subMsg, VerifyClaim subModel ) ->
-            VerifyClaim.update subMsg subModel
-                >> updateLoggedInUResult VerifyClaim GotVerifyClaimMsg model
+        ( GotVerifyClaimMsg subMsg, Claim objectiveId actionId subModel ) ->
+            Claim.update subMsg subModel
+                >> updateLoggedInUResult (Claim objectiveId actionId) GotVerifyClaimMsg model
                 |> withLoggedIn
 
-        ( GotTransferScreenMsg subMsg, Transfer transferId subModel ) ->
+        ( GotViewTransferScreenMsg subMsg, ViewTransfer transferId subModel ) ->
+            ViewTransfer.update subMsg subModel
+                >> updateLoggedInUResult (ViewTransfer transferId) GotViewTransferScreenMsg model
+                |> withLoggedIn
+
+        ( GotInviteMsg subMsg, Invite subModel ) ->
+            Invite.update model.session subMsg subModel
+                |> updateLoggedInUResult Invite GotInviteMsg model
+
+        ( GotJoinMsg subMsg, Join subModel ) ->
+            Join.update model.session subMsg subModel
+                |> updateLoggedInUResult Join GotJoinMsg model
+
+        ( GotTransferMsg subMsg, Transfer subModel ) ->
             Transfer.update subMsg subModel
-                >> updateLoggedInUResult (Transfer transferId) GotTransferScreenMsg model
+                >> updateLoggedInUResult Transfer GotTransferMsg model
+                |> withLoggedIn
+
+        ( GotAnalysisMsg subMsg, Analysis subModel ) ->
+            Analysis.update subMsg subModel
+                >> updateLoggedInUResult Analysis GotAnalysisMsg model
                 |> withLoggedIn
 
         ( _, _ ) ->
             ( model
             , Log.impossible ("Main" :: msgToString msg |> String.join ".")
             )
+
+
+broadcastGuest : Guest.BroadcastMsg -> Status -> Cmd Msg
+broadcastGuest broadcastMessage status =
+    let
+        maybeMsg =
+            case status of
+                Register _ _ _ ->
+                    Register.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotRegisterMsg
+
+                _ ->
+                    Nothing
+    in
+    case maybeMsg of
+        Just msg ->
+            spawnMessage msg
+
+        Nothing ->
+            Cmd.none
+
+
+broadcast : LoggedIn.BroadcastMsg -> Status -> Cmd Msg
+broadcast broadcastMessage status =
+    let
+        maybeMsg =
+            case status of
+                Dashboard _ ->
+                    Dashboard.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotDashboardMsg
+
+                Shop _ _ ->
+                    Shop.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotShopMsg
+
+                Transfer _ ->
+                    Transfer.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotTransferMsg
+
+                Analysis _ ->
+                    Analysis.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotAnalysisMsg
+
+                ProfileClaims _ ->
+                    ProfileClaims.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotProfileClaimsMsg
+
+                ActionEditor _ ->
+                    ActionEditor.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotActionEditorMsg
+
+                Objectives _ ->
+                    Objectives.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotObjectivesMsg
+
+                CommunitySettingsFeatures _ ->
+                    CommunitySettingsFeatures.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotCommunitySettingsFeaturesMsg
+
+                CommunitySettingsInfo _ ->
+                    CommunitySettingsInfo.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotCommunitySettingsInfoMsg
+
+                CommunitySettingsCurrency _ ->
+                    CommunitySettingsCurrency.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotCommunitySettingsCurrencyMsg
+
+                CommunitySettings _ ->
+                    CommunitySettings.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotCommunitySettingsMsg
+
+                ObjectiveEditor _ ->
+                    ObjectiveEditor.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotObjectiveEditorMsg
+
+                ProfileAddContact _ ->
+                    ProfileAddContact.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotProfileAddContactMsg
+
+                ProfileEditor _ ->
+                    ProfileEditor.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotProfileEditorMsg
+
+                Invite _ ->
+                    Invite.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotInviteMsg
+
+                Join _ ->
+                    Join.receiveBroadcast broadcastMessage
+                        |> Maybe.map GotJoinMsg
+
+                _ ->
+                    Nothing
+    in
+    case maybeMsg of
+        Just msg ->
+            spawnMessage msg
+
+        Nothing ->
+            Cmd.none
+
+
+spawnMessage : Msg -> Cmd Msg
+spawnMessage msg =
+    Task.succeed ()
+        |> Task.perform (\_ -> msg)
 
 
 updateStatusWith : (subModel -> Status) -> (subMsg -> Msg) -> Model -> ( subModel, Cmd subMsg ) -> ( Model, Cmd Msg )
@@ -428,11 +597,58 @@ updateGuestUResult : (subModel -> Status) -> (subMsg -> Msg) -> Model -> UpdateR
 updateGuestUResult toStatus toMsg model uResult =
     List.foldl
         (\commExtMsg ( m, cmds_ ) ->
-            case commExtMsg of
-                Guest.UpdatedGuest guest ->
-                    ( { m | session = Page.Guest guest }
-                    , cmds_
-                    )
+            case m.session of
+                Page.LoggedIn _ ->
+                    ( m, cmds_ )
+
+                Page.Guest guest ->
+                    case commExtMsg of
+                        Guest.LoggedIn privateKey { user, token } ->
+                            let
+                                shared =
+                                    guest.shared
+
+                                userWithCommunity =
+                                    { user
+                                        | communities =
+                                            case guest.community of
+                                                RemoteData.Success community ->
+                                                    if List.any (\c -> c.symbol == community.symbol) user.communities then
+                                                        user.communities
+
+                                                    else
+                                                        { symbol = community.symbol
+                                                        , name = community.name
+                                                        , logo = community.logo
+                                                        , subdomain = community.subdomain
+                                                        , hasShop = community.hasShop
+                                                        , hasActions = community.hasObjectives
+                                                        , hasKyc = community.hasKyc
+                                                        }
+                                                            :: user.communities
+
+                                                _ ->
+                                                    user.communities
+                                    }
+
+                                ( session, cmd ) =
+                                    LoggedIn.initLogin shared (Just privateKey) userWithCommunity token
+                            in
+                            ( { m
+                                | session =
+                                    Page.LoggedIn session
+                              }
+                            , Cmd.map (Page.GotLoggedInMsg >> GotPageMsg) cmd
+                                :: (Maybe.withDefault Route.Dashboard guest.afterLoginRedirect
+                                        |> Route.pushUrl guest.shared.navKey
+                                   )
+                                :: cmds_
+                            )
+
+                        Guest.SetFeedback feedback ->
+                            ( { m | session = Page.Guest { guest | feedback = feedback } }
+                            , cmds_
+                            )
         )
         ( { model | status = toStatus uResult.model }
         , []
@@ -454,40 +670,35 @@ updateLoggedInUResult : (subModel -> Status) -> (subMsg -> Msg) -> Model -> Upda
 updateLoggedInUResult toStatus toMsg model uResult =
     List.foldl
         (\commExtMsg ( m, cmds_ ) ->
-            case commExtMsg of
-                LoggedIn.UpdateBalances ->
+            case ( commExtMsg, m.session ) of
+                ( LoggedIn.UpdatedLoggedIn loggedIn, Page.Guest _ ) ->
+                    ( { m | session = Page.LoggedIn loggedIn }, cmds_ )
+
+                ( _, Page.LoggedIn loggedIn ) ->
                     let
-                        update_cmd =
-                            case m.session of
-                                Page.LoggedIn loggedIn ->
-                                    let
-                                        u_command =
-                                            Api.getBalances loggedIn.shared loggedIn.accountName GotUpdatedBalances
-                                    in
-                                    u_command
+                        updateResult =
+                            LoggedIn.updateExternal commExtMsg loggedIn
 
-                                _ ->
+                        broadcastCmd =
+                            case updateResult.broadcastMsg of
+                                Nothing ->
                                     Cmd.none
-                    in
-                    ( m, cmds_ ++ [ update_cmd ] )
 
-                LoggedIn.UpdatedLoggedIn loggedIn ->
-                    ( { m | session = Page.LoggedIn loggedIn }
-                    , cmds_
+                                Just broadcastMsg ->
+                                    broadcast broadcastMsg m.status
+                    in
+                    ( { m
+                        | session = Page.LoggedIn updateResult.model
+                        , afterAuthMsg = Maybe.map toMsg updateResult.afterAuthMsg
+                      }
+                    , Cmd.map toMsg updateResult.externalCmd
+                        :: Cmd.map (Page.GotLoggedInMsg >> GotPageMsg) updateResult.cmd
+                        :: broadcastCmd
+                        :: cmds_
                     )
 
-                LoggedIn.RequiredAuthentication maybeMsg ->
-                    case m.session of
-                        Page.LoggedIn loggedIn ->
-                            ( { m
-                                | session = Page.LoggedIn (LoggedIn.askedAuthentication loggedIn)
-                                , afterAuthMsg = Maybe.map toMsg maybeMsg
-                              }
-                            , cmds_
-                            )
-
-                        _ ->
-                            ( m, cmds_ )
+                ( _, Page.Guest _ ) ->
+                    ( m, cmds_ )
         )
         ( { model | status = toStatus uResult.model }
         , []
@@ -503,6 +714,140 @@ updateLoggedInUResult toStatus toMsg model uResult =
                     )
                 )
            )
+
+
+hideFeedback : Model -> Model
+hideFeedback model =
+    case model.session of
+        Page.LoggedIn loggedIn ->
+            { model
+                | session =
+                    Page.LoggedIn { loggedIn | feedback = Feedback.Hidden }
+            }
+
+        Page.Guest guest ->
+            { model | session = Page.Guest { guest | feedback = Feedback.Hidden } }
+
+
+statusToRoute : Status -> Maybe Route
+statusToRoute status =
+    case status of
+        Redirect ->
+            Nothing
+
+        NotFound ->
+            Nothing
+
+        ComingSoon ->
+            Nothing
+
+        PaymentHistory subModel ->
+            subModel.recipientProfile.account
+                |> Eos.Account.nameToString
+                |> Route.PaymentHistory
+                |> Just
+
+        Community _ ->
+            Just Route.Community
+
+        CommunityEditor _ ->
+            Just Route.NewCommunity
+
+        CommunitySettings _ ->
+            Just Route.CommunitySettings
+
+        CommunitySettingsFeatures _ ->
+            Just Route.CommunitySettingsFeatures
+
+        CommunitySettingsInfo _ ->
+            Just Route.CommunitySettingsInfo
+
+        CommunitySettingsCurrency _ ->
+            Just Route.CommunitySettingsCurrency
+
+        CommunitySelector _ ->
+            Just Route.CommunitySelector
+
+        Objectives _ ->
+            Just Route.Objectives
+
+        ObjectiveEditor subModel ->
+            case subModel.objectiveId of
+                Nothing ->
+                    Just Route.NewObjective
+
+                Just objectiveId ->
+                    Just (Route.EditObjective objectiveId)
+
+        ActionEditor subModel ->
+            case subModel.actionId of
+                Nothing ->
+                    Just (Route.NewAction subModel.objectiveId)
+
+                Just actionId ->
+                    Just (Route.EditAction subModel.objectiveId actionId)
+
+        Claim objectiveId actionId subModel ->
+            Just (Route.Claim objectiveId actionId subModel.claimId)
+
+        Notification _ ->
+            Just Route.Notification
+
+        Dashboard _ ->
+            Just Route.Dashboard
+
+        Login maybeRedirect _ ->
+            Just (Route.Login maybeRedirect)
+
+        Profile _ ->
+            Just Route.Profile
+
+        ProfilePublic profileName _ ->
+            Just (Route.ProfilePublic profileName)
+
+        ProfileEditor _ ->
+            Just Route.ProfileEditor
+
+        ProfileAddKyc _ ->
+            Just Route.ProfileAddKyc
+
+        ProfileClaims subModel ->
+            Just (Route.ProfileClaims subModel.accountString)
+
+        ProfileAddContact _ ->
+            Just Route.ProfileAddContact
+
+        Register inviteId maybeRedirect _ ->
+            Just (Route.Register inviteId maybeRedirect)
+
+        Shop filter _ ->
+            Just (Route.Shop filter)
+
+        ShopEditor maybeSaleId _ ->
+            case maybeSaleId of
+                Nothing ->
+                    Just Route.NewSale
+
+                Just saleId ->
+                    Just (Route.EditSale saleId)
+
+        ShopViewer saleId _ ->
+            Just (Route.ViewSale saleId)
+
+        ViewTransfer transferId _ ->
+            Just (Route.ViewTransfer transferId)
+
+        Invite subModel ->
+            Just (Route.Invite subModel.invitationId)
+
+        Join _ ->
+            Just Route.Join
+
+        Transfer subModel ->
+            Just (Route.Transfer subModel.maybeTo)
+
+        Analysis _ ->
+            Just Route.Analysis
 
 
 changeRouteTo : Maybe Route -> Model -> ( Model, Cmd Msg )
@@ -570,54 +915,66 @@ changeRouteTo maybeRoute model =
                     , Route.replaceUrl shared.navKey redirect
                     )
 
+        addRouteToHistory status loggedIn =
+            case statusToRoute status of
+                Nothing ->
+                    loggedIn
+
+                Just newRoute ->
+                    case loggedIn.routeHistory of
+                        (_ :: second :: rest) as routeHistory ->
+                            if newRoute == second then
+                                { loggedIn | routeHistory = newRoute :: rest }
+
+                            else
+                                { loggedIn | routeHistory = newRoute :: routeHistory }
+
+                        routeHistory ->
+                            { loggedIn | routeHistory = newRoute :: routeHistory }
+
         withLoggedIn route fn =
             case session of
                 Page.LoggedIn loggedIn ->
-                    fn loggedIn
+                    let
+                        ( newModel, newCmd ) =
+                            fn loggedIn
+
+                        newSession =
+                            case newModel.session of
+                                Page.LoggedIn newLoggedIn ->
+                                    addRouteToHistory newModel.status newLoggedIn
+                                        |> Page.LoggedIn
+
+                                Page.Guest guest ->
+                                    Page.Guest guest
+                    in
+                    ( { newModel | session = newSession }
+                    , Cmd.batch
+                        [ newCmd
+
+                        -- Reload time on every page change
+                        , Task.perform
+                            (LoggedIn.GotTimeInternal
+                                >> Page.GotLoggedInMsg
+                                >> GotPageMsg
+                            )
+                            Time.now
+                        ]
+                    )
 
                 Page.Guest guest ->
-                    case guest.profile of
-                        Nothing ->
-                            ( { model
-                                | session =
-                                    Guest.addAfterLoginRedirect route guest
-                                        |> Page.Guest
-                                , status = Redirect
-                              }
-                            , Route.replaceUrl shared.navKey (Route.Login (Just route))
-                            )
+                    ( { model
+                        | session =
+                            Guest.addAfterLoginRedirect route guest
+                                |> Page.Guest
+                        , status = Redirect
+                      }
+                    , if guest.isLoggingIn then
+                        Cmd.none
 
-                        Just profile ->
-                            let
-                                authModel =
-                                    case model.status of
-                                        Login subModel ->
-                                            subModel.auth
-
-                                        Register _ subModel ->
-                                            Maybe.map
-                                                (\r ->
-                                                    Auth.initRegister r.privateKey
-                                                )
-                                                subModel.accountKeys
-                                                |> Maybe.withDefault
-                                                    (Auth.init guest.shared)
-
-                                        _ ->
-                                            Auth.init guest.shared
-
-                                ( loggedIn, cmd ) =
-                                    Page.login authModel profile guest
-
-                                ( newModel, newCmd ) =
-                                    fn loggedIn
-                            in
-                            ( { newModel | session = Page.LoggedIn loggedIn }
-                            , Cmd.batch
-                                [ Cmd.map GotPageMsg cmd
-                                , newCmd
-                                ]
-                            )
+                      else
+                        Route.replaceUrl shared.navKey Route.Join
+                    )
     in
     case maybeRoute of
         Nothing ->
@@ -637,21 +994,20 @@ changeRouteTo maybeRoute model =
 
         Just (Route.Register invitation maybeRedirect) ->
             withGuest
-                Register.init
-                (updateStatusWith (Register invitation) GotRegisterMsg)
+                (Register.init invitation)
+                (updateStatusWith (Register invitation maybeRedirect) GotRegisterMsg)
                 maybeRedirect
 
         Just (Route.Login maybeRedirect) ->
             withGuest
                 Login.init
-                (updateStatusWith Login GotLoginMsg)
+                (updateStatusWith (Login maybeRedirect) GotLoginMsg)
                 maybeRedirect
 
-        Just (Route.LoginWithPrivateKey maybeRedirect) ->
-            withGuest
-                Login.init
-                (updateStatusWith Login GotLoginMsg)
-                maybeRedirect
+        Just (Route.PaymentHistory accountName) ->
+            PaymentHistory.init
+                >> updateStatusWith PaymentHistory GotPaymentHistoryMsg model
+                |> withLoggedIn (Route.PaymentHistory accountName)
 
         Just Route.Logout ->
             Page.logout
@@ -663,65 +1019,105 @@ changeRouteTo maybeRoute model =
                 >> updateStatusWith Notification GotNotificationMsg model
                 |> withLoggedIn Route.Notification
 
+        Just (Route.ProfilePublic account) ->
+            (\loggedIn -> ProfilePublic.init loggedIn account)
+                >> updateStatusWith (ProfilePublic account) GotProfilePublicMsg model
+                |> withLoggedIn (Route.ProfilePublic account)
+
         Just Route.Profile ->
             Profile.init
                 >> updateStatusWith Profile GotProfileMsg model
                 |> withLoggedIn Route.Profile
+
+        Just Route.ProfileEditor ->
+            ProfileEditor.init
+                >> updateStatusWith ProfileEditor GotProfileEditorMsg model
+                |> withLoggedIn Route.ProfileEditor
+
+        Just Route.ProfileAddKyc ->
+            ProfileAddKyc.init
+                >> updateStatusWith ProfileAddKyc GotProfileAddKycMsg model
+                |> withLoggedIn Route.ProfileAddKyc
+
+        Just (Route.ProfileClaims account) ->
+            (\l -> ProfileClaims.init l account)
+                >> updateStatusWith ProfileClaims GotProfileClaimsMsg model
+                |> withLoggedIn (Route.ProfileClaims account)
+
+        Just Route.ProfileAddContact ->
+            ProfileAddContact.init
+                >> updateStatusWith ProfileAddContact GotProfileAddContactMsg model
+                |> withLoggedIn Route.ProfileAddContact
 
         Just Route.Dashboard ->
             Dashboard.init
                 >> updateStatusWith Dashboard GotDashboardMsg model
                 |> withLoggedIn Route.Dashboard
 
-        Just (Route.Community symbol) ->
-            (\l -> Community.init l symbol)
+        Just Route.Community ->
+            (\l -> CommunityPage.init l)
                 >> updateStatusWith Community GotCommunityMsg model
-                |> withLoggedIn (Route.Community symbol)
+                |> withLoggedIn Route.Community
+
+        Just Route.CommunitySettings ->
+            CommunitySettings.init
+                >> updateStatusWith CommunitySettings GotCommunitySettingsMsg model
+                |> withLoggedIn Route.CommunitySettings
+
+        Just Route.CommunitySettingsFeatures ->
+            CommunitySettingsFeatures.init
+                >> updateStatusWith CommunitySettingsFeatures GotCommunitySettingsFeaturesMsg model
+                |> withLoggedIn Route.CommunitySettingsFeatures
+
+        Just Route.CommunitySettingsInfo ->
+            CommunitySettingsInfo.init
+                >> updateStatusWith CommunitySettingsInfo GotCommunitySettingsInfoMsg model
+                |> withLoggedIn Route.CommunitySettingsInfo
+
+        Just Route.CommunitySettingsCurrency ->
+            CommunitySettingsCurrency.init
+                >> updateStatusWith CommunitySettingsCurrency GotCommunitySettingsCurrencyMsg model
+                |> withLoggedIn Route.CommunitySettingsCurrency
+
+        Just Route.CommunitySelector ->
+            CommunitySelector.init
+                >> updateStatusWith CommunitySelector (\_ -> Ignored) model
+                |> withLoggedIn Route.CommunitySelector
 
         Just Route.NewCommunity ->
-            CommunityEditor.initNew
+            CommunityEditor.init
                 >> updateStatusWith CommunityEditor GotCommunityEditorMsg model
                 |> withLoggedIn Route.NewCommunity
 
-        Just (Route.EditCommunity symbol) ->
-            (\l -> CommunityEditor.initEdit l symbol)
-                >> updateStatusWith CommunityEditor GotCommunityEditorMsg model
-                |> withLoggedIn (Route.EditCommunity symbol)
-
-        Just (Route.Objectives symbol) ->
-            (\l -> Objectives.init l symbol)
+        Just Route.Objectives ->
+            Objectives.init
                 >> updateStatusWith Objectives GotObjectivesMsg model
-                |> withLoggedIn (Route.Objectives symbol)
+                |> withLoggedIn Route.Objectives
 
-        Just (Route.NewObjective symbol) ->
-            (\l -> ObjectiveEditor.initNew l symbol)
+        Just Route.NewObjective ->
+            ObjectiveEditor.initNew
                 >> updateStatusWith ObjectiveEditor GotObjectiveEditorMsg model
-                |> withLoggedIn (Route.NewObjective symbol)
+                |> withLoggedIn Route.NewObjective
 
-        Just (Route.EditObjective symbol objectiveId) ->
-            (\l -> ObjectiveEditor.initEdit l symbol objectiveId)
+        Just (Route.EditObjective objectiveId) ->
+            (\l -> ObjectiveEditor.initEdit l objectiveId)
                 >> updateStatusWith ObjectiveEditor GotObjectiveEditorMsg model
-                |> withLoggedIn (Route.EditObjective symbol objectiveId)
+                |> withLoggedIn (Route.EditObjective objectiveId)
 
-        Just (Route.NewAction symbol objectiveId) ->
-            (\l -> ActionEditor.initNew l symbol objectiveId)
+        Just (Route.NewAction objectiveId) ->
+            (\l -> ActionEditor.init l objectiveId Nothing)
                 >> updateStatusWith ActionEditor GotActionEditorMsg model
-                |> withLoggedIn (Route.NewAction symbol objectiveId)
+                |> withLoggedIn (Route.NewAction objectiveId)
 
-        Just (Route.EditAction symbol objectiveId actionId) ->
-            (\l -> ActionEditor.initEdit l symbol objectiveId actionId)
+        Just (Route.EditAction objectiveId actionId) ->
+            (\l -> ActionEditor.init l objectiveId (Just actionId))
                 >> updateStatusWith ActionEditor GotActionEditorMsg model
-                |> withLoggedIn (Route.EditAction symbol objectiveId actionId)
+                |> withLoggedIn (Route.EditAction objectiveId actionId)
 
-        Just (Route.VerifyClaim communityId objectiveId actionId claimId) ->
-            (\l -> VerifyClaim.init l claimId)
-                >> updateStatusWith VerifyClaim GotVerifyClaimMsg model
-                |> withLoggedIn (Route.VerifyClaim communityId objectiveId actionId claimId)
-
-        Just Route.Communities ->
-            CommunityExplore.init
-                >> updateStatusWith CommunityExplore GotCommunityExploreMsg model
-                |> withLoggedIn Route.Communities
+        Just (Route.Claim objectiveId actionId claimId) ->
+            (\l -> Claim.init l claimId)
+                >> updateStatusWith (Claim objectiveId actionId) GotVerifyClaimMsg model
+                |> withLoggedIn (Route.Claim objectiveId actionId claimId)
 
         Just (Route.Shop maybeFilter) ->
             (\l -> Shop.init l maybeFilter)
@@ -743,10 +1139,28 @@ changeRouteTo maybeRoute model =
                 >> updateStatusWith (ShopViewer saleId) GotShopViewerMsg model
                 |> withLoggedIn (Route.ViewSale saleId)
 
-        Just (Route.Transfer transferId) ->
-            (\l -> Transfer.init l transferId)
-                >> updateStatusWith (Transfer transferId) GotTransferScreenMsg model
-                |> withLoggedIn (Route.Transfer transferId)
+        Just (Route.ViewTransfer transferId) ->
+            (\l -> ViewTransfer.init l transferId)
+                >> updateStatusWith (ViewTransfer transferId) GotViewTransferScreenMsg model
+                |> withLoggedIn (Route.ViewTransfer transferId)
+
+        Just (Route.Invite invitationId) ->
+            Invite.init session invitationId
+                |> updateStatusWith Invite GotInviteMsg model
+
+        Just Route.Join ->
+            Join.init session
+                |> updateStatusWith Join GotJoinMsg model
+
+        Just (Route.Transfer maybeTo) ->
+            (\l -> Transfer.init l maybeTo)
+                >> updateStatusWith Transfer GotTransferMsg model
+                |> withLoggedIn (Route.Transfer maybeTo)
+
+        Just Route.Analysis ->
+            (\l -> Analysis.init l)
+                >> updateStatusWith Analysis GotAnalysisMsg model
+                |> withLoggedIn Route.Analysis
 
 
 jsAddressToMsg : List String -> Value -> Maybe Msg
@@ -764,10 +1178,6 @@ jsAddressToMsg address val =
             Maybe.map GotDashboardMsg
                 (Dashboard.jsAddressToMsg rAddress val)
 
-        "GotCommunityMsg" :: rAddress ->
-            Maybe.map GotCommunityMsg
-                (Community.jsAddressToMsg rAddress val)
-
         "GotCommunityEditorMsg" :: rAddress ->
             Maybe.map GotCommunityEditorMsg
                 (CommunityEditor.jsAddressToMsg rAddress val)
@@ -779,6 +1189,10 @@ jsAddressToMsg address val =
         "GotShopEditorMsg" :: rAddress ->
             Maybe.map GotShopEditorMsg
                 (ShopEditor.jsAddressToMsg rAddress val)
+
+        "GotShopViewerMsg" :: rAddress ->
+            Maybe.map GotShopViewerMsg
+                (ShopViewer.jsAddressToMsg rAddress val)
 
         "GotRegisterMsg" :: rAddress ->
             Maybe.map GotRegisterMsg
@@ -792,13 +1206,37 @@ jsAddressToMsg address val =
             Maybe.map GotProfileMsg
                 (Profile.jsAddressToMsg rAddress val)
 
-        "GotActionEditor" :: rAddress ->
+        "GotCommunitySettingsFeaturesMsg" :: rAddress ->
+            Maybe.map GotCommunitySettingsFeaturesMsg
+                (CommunitySettingsFeatures.jsAddressToMsg rAddress val)
+
+        "GotCommunitySettingsInfoMsg" :: rAddress ->
+            Maybe.map GotCommunitySettingsInfoMsg
+                (CommunitySettingsInfo.jsAddressToMsg rAddress val)
+
+        "GotCommunitySettingsCurrencyMsg" :: rAddress ->
+            Maybe.map GotCommunitySettingsCurrencyMsg
+                (CommunitySettingsCurrency.jsAddressToMsg rAddress val)
+
+        "GotActionEditorMsg" :: rAddress ->
             Maybe.map GotActionEditorMsg
                 (ActionEditor.jsAddressToMsg rAddress val)
 
         "GotVerifyClaimMsg" :: rAddress ->
             Maybe.map GotVerifyClaimMsg
-                (VerifyClaim.jsAddressToMsg rAddress val)
+                (Claim.jsAddressToMsg rAddress val)
+
+        "GotTransferMsg" :: rAddress ->
+            Maybe.map GotTransferMsg
+                (Transfer.jsAddressToMsg rAddress val)
+
+        "GotAnalysisMsg" :: rAddress ->
+            Maybe.map GotAnalysisMsg
+                (Analysis.jsAddressToMsg rAddress val)
+
+        "GotProfileClaimsMsg" :: rAddress ->
+            Maybe.map GotProfileClaimsMsg
+                (ProfileClaims.jsAddressToMsg rAddress val)
 
         _ ->
             Nothing
@@ -809,9 +1247,6 @@ msgToString msg =
     case msg of
         Ignored ->
             [ "Ignored" ]
-
-        ChangedRoute _ ->
-            [ "ChangedRoute" ]
 
         ChangedUrl _ ->
             [ "ChangedUrl" ]
@@ -826,25 +1261,34 @@ msgToString msg =
             "GotPageMsg" :: Page.msgToString subMsg
 
         GotCommunityMsg subMsg ->
-            "GotCommunityMsg" :: Community.msgToString subMsg
+            "GotCommunityMsg" :: CommunityPage.msgToString subMsg
 
         GotCommunityEditorMsg subMsg ->
             "GotCommunityEditorMsg" :: CommunityEditor.msgToString subMsg
 
+        GotCommunitySettingsMsg subMsg ->
+            "GotCommunitySettingsMsg" :: CommunitySettings.msgToString subMsg
+
+        GotCommunitySettingsFeaturesMsg subMsg ->
+            "GotCommunitySettingsFeaturesMsg" :: CommunitySettingsFeatures.msgToString subMsg
+
+        GotCommunitySettingsInfoMsg subMsg ->
+            "GotCommunitySettingsInfoMsg" :: CommunitySettingsInfo.msgToString subMsg
+
+        GotCommunitySettingsCurrencyMsg subMsg ->
+            "GotCommunitySettingsCurrencyMsg" :: CommunitySettingsCurrency.msgToString subMsg
+
         GotObjectivesMsg subMsg ->
-            "GotObjectives" :: Objectives.msgToString subMsg
+            "GotObjectivesMsg" :: Objectives.msgToString subMsg
 
         GotObjectiveEditorMsg subMsg ->
             "GotObjectiveEditorMsg" :: ObjectiveEditor.msgToString subMsg
 
         GotActionEditorMsg subMsg ->
-            "GotActionEditor" :: ActionEditor.msgToString subMsg
+            "GotActionEditorMsg" :: ActionEditor.msgToString subMsg
 
         GotVerifyClaimMsg subMsg ->
-            "GotVerifyClaimMsg" :: VerifyClaim.msgToString subMsg
-
-        GotCommunityExploreMsg subMsg ->
-            "GotCommunityExploreMsg" :: CommunityExplore.msgToString subMsg
+            "GotVerifyClaimMsg" :: Claim.msgToString subMsg
 
         GotNotificationMsg subMsg ->
             "GotNotificationMsg" :: Notification.msgToString subMsg
@@ -855,8 +1299,26 @@ msgToString msg =
         GotLoginMsg subMsg ->
             "GotLoginMsg" :: Login.msgToString subMsg
 
+        GotProfilePublicMsg subMsg ->
+            "GotProfilePublicMsg" :: ProfilePublic.msgToString subMsg
+
+        GotPaymentHistoryMsg subMsg ->
+            "GotPaymentHistoryMsg" :: PaymentHistory.msgToString subMsg
+
         GotProfileMsg subMsg ->
             "GotProfileMsg" :: Profile.msgToString subMsg
+
+        GotProfileEditorMsg subMsg ->
+            "GotProfileEditorMsg" :: ProfileEditor.msgToString subMsg
+
+        GotProfileAddKycMsg subMsg ->
+            "GotProfileAddKycMsg" :: ProfileAddKyc.msgToString subMsg
+
+        GotProfileClaimsMsg subMsg ->
+            "GotProfileClaimsMsg" :: ProfileClaims.msgToString subMsg
+
+        GotProfileAddContactMsg subMsg ->
+            "GotProfileAddContactMsg" :: ProfileAddContact.msgToString subMsg
 
         GotRegisterMsg subMsg ->
             "GotRegisterMsg" :: Register.msgToString subMsg
@@ -867,66 +1329,112 @@ msgToString msg =
         GotShopEditorMsg subMsg ->
             "GotShopEditorMsg" :: ShopEditor.msgToString subMsg
 
-        GotUpdatedBalances _ ->
-            [ "GotUpdatedBalances" ]
-
         GotShopViewerMsg subMsg ->
             "GotShopViewerMsg" :: ShopViewer.msgToString subMsg
 
-        GotTransferScreenMsg subMsg ->
-            "GotTransferScreenMsg" :: Transfer.msgToString subMsg
+        GotViewTransferScreenMsg subMsg ->
+            "GotViewTransferScreenMsg" :: ViewTransfer.msgToString subMsg
+
+        GotInviteMsg subMsg ->
+            "GotInviteMsg" :: Invite.msgToString subMsg
+
+        GotJoinMsg subMsg ->
+            "GotJoinMsg" :: Join.msgToString subMsg
+
+        GotTransferMsg subMsg ->
+            "GotTransferMsg" :: Transfer.msgToString subMsg
+
+        GotAnalysisMsg subMsg ->
+            "GotAnalysisMsg" :: Analysis.msgToString subMsg
 
 
 
 -- VIEW
 
 
-viewChat : Html Msg
-viewChat =
-    div [ id "chat-container", style "display" "none" ]
-        [ iframe
-            [ id "chat-manager"
-            , style "height" "0%"
-            , style "width" "0%"
-            ]
-            []
-        ]
-
-
-view : Model -> Html Msg
+view : Model -> Document Msg
 view model =
     let
-        viewGuest subModel page toMsg content =
+        baseTitle =
+            "Cambiatus"
+
+        fullPageTitle : String -> String
+        fullPageTitle subTitle =
+            if subTitle == "" then
+                baseTitle
+
+            else
+                subTitle ++ " | " ++ baseTitle
+
+        viewGuest :
+            subModel
+            -> Guest.Page
+            -> (subMsg -> Msg)
+            -> (Guest.Model -> subModel -> { title : String, content : Html subMsg })
+            -> Document Msg
+        viewGuest subModel page toMsg subView =
             case model.session of
                 Page.Guest guest ->
-                    Html.map toMsg (content guest subModel)
-                        |> Page.viewGuest GotPageMsg page guest
+                    let
+                        { title, content } =
+                            subView guest subModel
+                    in
+                    Document
+                        (fullPageTitle title)
+                        [ Html.map toMsg content
+                            |> Page.viewGuest GotPageMsg page guest
+                        ]
 
                 Page.LoggedIn _ ->
-                    text ""
+                    Document (fullPageTitle "") [ text "" ]
 
-        viewLoggedIn subModel page toMsg content =
+        viewLoggedIn :
+            subModel
+            -> LoggedIn.Page
+            -> (subMsg -> Msg)
+            -> (LoggedIn.Model -> subModel -> { title : String, content : Html subMsg })
+            -> Document Msg
+        viewLoggedIn subModel page toMsg subView =
             case model.session of
                 Page.Guest _ ->
-                    text ""
+                    Document (fullPageTitle "") [ text "" ]
 
                 Page.LoggedIn loggedIn ->
-                    Html.map toMsg (content loggedIn subModel)
-                        |> Page.viewLoggedIn GotPageMsg page loggedIn
+                    let
+                        { title, content } =
+                            subView loggedIn subModel
+                    in
+                    Document
+                        (fullPageTitle title)
+                        [ Html.map toMsg content
+                            |> Page.viewLoggedIn GotPageMsg page loggedIn
+                        ]
 
-        viewPage guestPage loggedInPage toMsg content =
+        viewPage :
+            Guest.Page
+            -> LoggedIn.Page
+            -> (subMsg -> Msg)
+            -> { title : String, content : Html subMsg }
+            -> Document Msg
+        viewPage guestPage loggedInPage toMsg { title, content } =
             case model.session of
                 Page.Guest guest ->
-                    Html.map toMsg content
-                        |> Page.viewGuest GotPageMsg guestPage guest
+                    Document
+                        (fullPageTitle title)
+                        [ Html.map toMsg content
+                            |> Page.viewGuest GotPageMsg guestPage guest
+                        ]
 
                 Page.LoggedIn loggedIn ->
-                    Html.map toMsg content
-                        |> Page.viewLoggedIn GotPageMsg loggedInPage loggedIn
+                    Document
+                        (fullPageTitle title)
+                        [ Html.map toMsg content
+                            |> Page.viewLoggedIn GotPageMsg loggedInPage loggedIn
+                        ]
     in
     case model.status of
         Redirect ->
-            viewPage Guest.Other LoggedIn.Other (\_ -> Ignored) (text "")
+            viewPage Guest.Other LoggedIn.Other (\_ -> Ignored) { title = "", content = text "" }
 
         NotFound ->
             viewPage Guest.Other LoggedIn.Other (\_ -> Ignored) (NotFound.view model.session)
@@ -934,50 +1442,92 @@ view model =
         ComingSoon ->
             viewPage Guest.Other LoggedIn.Other (\_ -> Ignored) (ComingSoon.view model.session)
 
-        Register _ subModel ->
-            viewGuest subModel Guest.Other GotRegisterMsg Register.view
+        Invite subModel ->
+            viewPage Guest.Invite LoggedIn.Invite GotInviteMsg (Invite.view model.session subModel)
 
-        Login subModel ->
-            viewGuest subModel Guest.Other GotLoginMsg Login.view
+        Join subModel ->
+            viewPage Guest.Join LoggedIn.Join GotJoinMsg (Join.view model.session subModel)
+
+        PaymentHistory subModel ->
+            viewLoggedIn subModel LoggedIn.PaymentHistory GotPaymentHistoryMsg PaymentHistory.view
+
+        Register _ _ subModel ->
+            viewGuest subModel Guest.Register GotRegisterMsg Register.view
+
+        Login _ subModel ->
+            viewGuest subModel Guest.Login GotLoginMsg Login.view
 
         Notification subModel ->
-            viewLoggedIn subModel LoggedIn.Other GotNotificationMsg Notification.view
+            viewLoggedIn subModel LoggedIn.Notification GotNotificationMsg Notification.view
 
         Community subModel ->
-            viewLoggedIn subModel LoggedIn.Other GotCommunityMsg Community.view
+            viewLoggedIn subModel LoggedIn.Community GotCommunityMsg CommunityPage.view
+
+        CommunitySettings subModel ->
+            viewLoggedIn subModel LoggedIn.CommunitySettings GotCommunitySettingsMsg CommunitySettings.view
+
+        CommunitySettingsFeatures subModel ->
+            viewLoggedIn subModel LoggedIn.CommunitySettingsFeatures GotCommunitySettingsFeaturesMsg CommunitySettingsFeatures.view
+
+        CommunitySettingsInfo subModel ->
+            viewLoggedIn subModel LoggedIn.CommunitySettingsInfo GotCommunitySettingsInfoMsg CommunitySettingsInfo.view
+
+        CommunitySettingsCurrency subModel ->
+            viewLoggedIn subModel LoggedIn.CommunitySettingsCurrency GotCommunitySettingsCurrencyMsg CommunitySettingsCurrency.view
+
+        CommunitySelector subModel ->
+            viewLoggedIn subModel LoggedIn.CommunitySelector (\_ -> Ignored) CommunitySelector.view
 
         CommunityEditor subModel ->
-            viewLoggedIn subModel LoggedIn.Other GotCommunityEditorMsg CommunityEditor.view
+            viewLoggedIn subModel LoggedIn.CommunityEditor GotCommunityEditorMsg CommunityEditor.view
 
         Objectives subModel ->
-            viewLoggedIn subModel LoggedIn.Other GotObjectivesMsg Objectives.view
+            viewLoggedIn subModel LoggedIn.Objectives GotObjectivesMsg Objectives.view
 
         ObjectiveEditor subModel ->
-            viewLoggedIn subModel LoggedIn.Other GotObjectiveEditorMsg ObjectiveEditor.view
+            viewLoggedIn subModel LoggedIn.ObjectiveEditor GotObjectiveEditorMsg ObjectiveEditor.view
 
         ActionEditor subModel ->
-            viewLoggedIn subModel LoggedIn.Other GotActionEditorMsg ActionEditor.view
+            viewLoggedIn subModel LoggedIn.ActionEditor GotActionEditorMsg ActionEditor.view
 
-        VerifyClaim subModel ->
-            viewLoggedIn subModel LoggedIn.Other GotVerifyClaimMsg VerifyClaim.view
-
-        CommunityExplore subModel ->
-            viewLoggedIn subModel LoggedIn.Communities GotCommunityExploreMsg CommunityExplore.view
+        Claim _ _ subModel ->
+            viewLoggedIn subModel LoggedIn.Claim GotVerifyClaimMsg Claim.view
 
         Dashboard subModel ->
             viewLoggedIn subModel LoggedIn.Dashboard GotDashboardMsg Dashboard.view
 
+        ProfilePublic _ subModel ->
+            viewLoggedIn subModel LoggedIn.ProfilePublic GotProfilePublicMsg ProfilePublic.view
+
         Profile subModel ->
             viewLoggedIn subModel LoggedIn.Profile GotProfileMsg Profile.view
 
-        Shop maybeFilter subModel ->
+        ProfileEditor subModel ->
+            viewLoggedIn subModel LoggedIn.ProfileEditor GotProfileEditorMsg ProfileEditor.view
+
+        ProfileAddKyc subModel ->
+            viewLoggedIn subModel LoggedIn.ProfileAddKyc GotProfileAddKycMsg ProfileAddKyc.view
+
+        ProfileClaims subModel ->
+            viewLoggedIn subModel LoggedIn.ProfileClaims GotProfileClaimsMsg ProfileClaims.view
+
+        ProfileAddContact subModel ->
+            viewLoggedIn subModel LoggedIn.ProfileAddContact GotProfileAddContactMsg ProfileAddContact.view
+
+        Shop _ subModel ->
             viewLoggedIn subModel LoggedIn.Shop GotShopMsg Shop.view
 
         ShopEditor _ subModel ->
-            viewLoggedIn subModel LoggedIn.Other GotShopEditorMsg ShopEditor.view
+            viewLoggedIn subModel LoggedIn.ShopEditor GotShopEditorMsg ShopEditor.view
 
         ShopViewer _ subModel ->
-            viewLoggedIn subModel LoggedIn.Shop GotShopViewerMsg ShopViewer.view
+            viewLoggedIn subModel LoggedIn.ShopViewer GotShopViewerMsg ShopViewer.view
 
-        Transfer _ subModel ->
-            viewLoggedIn subModel LoggedIn.Other GotTransferScreenMsg Transfer.view
+        ViewTransfer _ subModel ->
+            viewLoggedIn subModel LoggedIn.ViewTransfer GotViewTransferScreenMsg ViewTransfer.view
+
+        Transfer subModel ->
+            viewLoggedIn subModel LoggedIn.Transfer GotTransferMsg Transfer.view
+
+        Analysis subModel ->
+            viewLoggedIn subModel LoggedIn.Analysis GotAnalysisMsg Analysis.view

@@ -1,11 +1,16 @@
-module Avatar exposing (Avatar, decode, empty, encode, selectionSet, toMaybeString, view)
+module Avatar exposing
+    ( Avatar
+    , empty
+    , fromString
+    , selectionSet
+    , toMaybeString
+    , view
+    )
 
-import Asset.Icon as Icon
 import Graphql.SelectionSet as SelectionSet exposing (SelectionSet)
-import Html exposing (Attribute, Html)
-import Html.Attributes exposing (class, style)
-import Json.Decode as Decode exposing (Decoder)
-import Json.Encode as Encode exposing (Value)
+import Html exposing (Html)
+import Html.Attributes exposing (class, src)
+import Icons
 
 
 
@@ -21,39 +26,26 @@ empty =
     Avatar Nothing
 
 
-decode : Decoder Avatar
-decode =
-    Decode.map Avatar (Decode.nullable Decode.string)
-
-
-encode : Avatar -> Value
-encode (Avatar maybeHash) =
-    case maybeHash of
-        Just hash ->
-            Encode.string hash
-
+view : Avatar -> String -> Html msg
+view (Avatar maybeUrl) cls =
+    case maybeUrl of
         Nothing ->
-            Encode.null
+            Icons.accountCircle cls
 
-
-view : String -> Avatar -> String -> Html msg
-view url (Avatar maybeHash) cls =
-    case maybeHash of
-        Nothing ->
-            Icon.accountCircle cls
-
-        Just hash ->
-            if String.isEmpty (String.trim hash) then
-                Icon.accountCircle cls
+        Just url ->
+            if String.isEmpty (String.trim url) then
+                Icons.accountCircle cls
 
             else
                 Html.div
-                    [ class ("profile-avatar " ++ cls)
-                    , style
-                        "background-image"
-                        ("url(" ++ url ++ "/" ++ hash ++ ")")
+                    [ class cls
                     ]
-                    []
+                    [ Html.img
+                        [ class ("object-cover rounded-full " ++ cls)
+                        , src url
+                        ]
+                        []
+                    ]
 
 
 selectionSet : SelectionSet (Maybe String) typeLock -> SelectionSet Avatar typeLock
@@ -64,3 +56,8 @@ selectionSet =
 toMaybeString : Avatar -> Maybe String
 toMaybeString (Avatar s) =
     s
+
+
+fromString : String -> Avatar
+fromString =
+    Just >> Avatar

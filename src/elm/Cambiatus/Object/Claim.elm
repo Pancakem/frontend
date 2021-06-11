@@ -4,6 +4,7 @@
 
 module Cambiatus.Object.Claim exposing (..)
 
+import Cambiatus.Enum.ClaimStatus
 import Cambiatus.InputObject
 import Cambiatus.Interface
 import Cambiatus.Object
@@ -19,7 +20,9 @@ import Graphql.SelectionSet exposing (SelectionSet)
 import Json.Decode as Decode
 
 
-action : SelectionSet decodesTo Cambiatus.Object.Action -> SelectionSet decodesTo Cambiatus.Object.Claim
+action :
+    SelectionSet decodesTo Cambiatus.Object.Action
+    -> SelectionSet decodesTo Cambiatus.Object.Claim
 action object_ =
     Object.selectionForCompositeField "action" [] object_ identity
 
@@ -28,7 +31,10 @@ type alias ChecksOptionalArguments =
     { input : OptionalArgument Cambiatus.InputObject.ChecksInput }
 
 
-checks : (ChecksOptionalArguments -> ChecksOptionalArguments) -> SelectionSet decodesTo Cambiatus.Object.Check -> SelectionSet (List decodesTo) Cambiatus.Object.Claim
+checks :
+    (ChecksOptionalArguments -> ChecksOptionalArguments)
+    -> SelectionSet decodesTo Cambiatus.Object.Check
+    -> SelectionSet (List decodesTo) Cambiatus.Object.Claim
 checks fillInOptionals object_ =
     let
         filledInOptionals =
@@ -41,7 +47,9 @@ checks fillInOptionals object_ =
     Object.selectionForCompositeField "checks" optionalArgs object_ (identity >> Decode.list)
 
 
-claimer : SelectionSet decodesTo Cambiatus.Object.Profile -> SelectionSet decodesTo Cambiatus.Object.Claim
+claimer :
+    SelectionSet decodesTo Cambiatus.Object.User
+    -> SelectionSet decodesTo Cambiatus.Object.Claim
 claimer object_ =
     Object.selectionForCompositeField "claimer" [] object_ identity
 
@@ -71,6 +79,16 @@ id =
     Object.selectionForField "Int" "id" [] Decode.int
 
 
-isVerified : SelectionSet Bool Cambiatus.Object.Claim
-isVerified =
-    Object.selectionForField "Bool" "isVerified" [] Decode.bool
+proofCode : SelectionSet (Maybe String) Cambiatus.Object.Claim
+proofCode =
+    Object.selectionForField "(Maybe String)" "proofCode" [] (Decode.string |> Decode.nullable)
+
+
+proofPhoto : SelectionSet (Maybe String) Cambiatus.Object.Claim
+proofPhoto =
+    Object.selectionForField "(Maybe String)" "proofPhoto" [] (Decode.string |> Decode.nullable)
+
+
+status : SelectionSet Cambiatus.Enum.ClaimStatus.ClaimStatus Cambiatus.Object.Claim
+status =
+    Object.selectionForField "Enum.ClaimStatus.ClaimStatus" "status" [] Cambiatus.Enum.ClaimStatus.decoder

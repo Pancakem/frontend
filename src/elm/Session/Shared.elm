@@ -1,7 +1,8 @@
 module Session.Shared exposing
     ( Shared
     , TranslationStatus(..)
-    , bespiralSymbol
+    , Translators
+    , communityDomain
     , init
     , langFlag
     , language
@@ -14,25 +15,25 @@ module Session.Shared exposing
     , viewLanguageItems
     )
 
-import Asset.Icon as Icon
 import Browser.Navigation as Nav
-import Community
-import Eos exposing (Symbol)
+import Eos
 import Eos.Account as Eos
-import Flags exposing (Endpoints, Environment, Flags, defaultEndpoints)
+import Flags exposing (Endpoints, Environment, Flags)
 import Graphql.Http
-import Html exposing (..)
-import Html.Attributes exposing (..)
+import Html exposing (Html, button, div, img, p, text)
+import Html.Attributes exposing (class, src)
 import Html.Events exposing (onClick)
 import Http
-import I18Next exposing (Translations, initialTranslations, t)
+import I18Next exposing (Translations, initialTranslations)
 import Time exposing (Posix)
+import Url exposing (Url)
 
 
 type alias Shared =
     { navKey : Nav.Key
     , language : String
     , translations : Translations
+    , translators : Translators
     , translationsStatus : TranslationStatus
     , environment : Environment
     , maybeAccount : Maybe ( Eos.Name, Bool )
@@ -41,14 +42,21 @@ type alias Shared =
     , logoMobile : String
     , now : Posix
     , allowCommunityCreation : Bool
+    , url : Url
+    , contracts : { token : String, community : String }
+    , graphqlSecret : String
+    , canReadClipboard : Bool
+    , useSubdomain : Bool
+    , selectedCommunity : Maybe Eos.Symbol
     }
 
 
-init : Flags -> Nav.Key -> Shared
-init ({ environment, maybeAccount, endpoints, allowCommunityCreation } as flags) navKey =
+init : Flags -> Nav.Key -> Url -> Shared
+init ({ environment, maybeAccount, endpoints, allowCommunityCreation, tokenContract, communityContract } as flags) navKey url =
     { navKey = navKey
     , language = flags.language
     , translations = initialTranslations
+    , translators = makeTranslators initialTranslations
     , translationsStatus = LoadingTranslation
     , environment = environment
     , maybeAccount = maybeAccount
@@ -57,6 +65,12 @@ init ({ environment, maybeAccount, endpoints, allowCommunityCreation } as flags)
     , logoMobile = flags.logoMobile
     , now = Time.millisToPosix flags.now
     , allowCommunityCreation = allowCommunityCreation
+    , url = url
+    , contracts = { token = tokenContract, community = communityContract }
+    , graphqlSecret = flags.graphqlSecret
+    , canReadClipboard = flags.canReadClipboard
+    , useSubdomain = flags.useSubdomain
+    , selectedCommunity = flags.selectedCommunity
     }
 
 
@@ -65,7 +79,35 @@ type TranslationStatus
     | LoadingTranslationFailed Http.Error
     | LoadedTranslation
     | LoadingAnotherTranslation
-    | LoadingAnotherTranslationFailed Http.Error
+    | LoadingAnotherTranslationFailed
+
+
+
+-- TRANSLATORS
+
+
+{-| Contains functions with bounded dictionaries for translating plain strings and strings with placeholders.
+-}
+type alias Translators =
+    { t : String -> String
+    , tr : String -> I18Next.Replacements -> String
+    }
+
+
+makeTranslators : Translations -> Translators
+makeTranslators translations =
+    let
+        t : String -> String
+        t =
+            I18Next.t translations
+
+        tr : String -> I18Next.Replacements -> String
+        tr =
+            I18Next.tr translations I18Next.Curly
+    in
+    { t = t
+    , tr = tr
+    }
 
 
 
@@ -82,9 +124,55 @@ translationStatus shared =
     shared.translationsStatus
 
 
-bespiralSymbol : Shared -> Symbol
-bespiralSymbol shared =
-    Eos.bespiralSymbol
+{-| Get the community subdomain and the current environment, based on current
+url. Example possible outputs:
+
+    [ "cambiatus", "staging" ] -- Cambiatus community in the staging environment
+
+    [ "cambiatus", "demo" ] -- Cambiatus community in the demo environment
+
+    [ "cambiatus" ] -- Cambiatus community in the prod environment
+
+-}
+communitySubdomainParts : Shared -> List String
+communitySubdomainParts shared =
+    let
+        allParts =
+            shared.url.host |> String.split "."
+    in
+    case shared.environment of
+        Flags.Development ->
+            case allParts of
+                [] ->
+                    [ "cambiatus", "staging" ]
+
+                [ subdomain ] ->
+                    [ subdomain, "staging" ]
+
+                subdomain :: "localhost" :: _ ->
+                    [ subdomain, "staging" ]
+
+                subdomain :: env :: _ ->
+                    [ subdomain, env ]
+
+        Flags.Production ->
+            case allParts of
+                [] ->
+                    [ "cambiatus" ]
+
+                [ subdomain ] ->
+                    [ subdomain ]
+
+                subdomain :: "cambiatus" :: _ ->
+                    [ subdomain ]
+
+                subdomain :: env :: _ ->
+                    [ subdomain, env ]
+
+
+communityDomain : Shared -> String
+communityDomain shared =
+    String.join "." (communitySubdomainParts shared ++ [ "cambiatus", "io" ])
 
 
 
@@ -99,7 +187,7 @@ toLoadingTranslation shared =
                 LoadedTranslation ->
                     LoadingAnotherTranslation
 
-                LoadingAnotherTranslationFailed _ ->
+                LoadingAnotherTranslationFailed ->
                     LoadingAnotherTranslation
 
                 _ ->
@@ -118,7 +206,7 @@ loadTranslation result shared =
                             LoadingTranslationFailed err
 
                         LoadingAnotherTranslation ->
-                            LoadingAnotherTranslationFailed err
+                            LoadingAnotherTranslationFailed
 
                         _ ->
                             shared.translationsStatus
@@ -128,6 +216,7 @@ loadTranslation result shared =
             { shared
                 | language = language_
                 , translations = translations
+                , translators = makeTranslators translations
                 , translationsStatus = LoadedTranslation
             }
 
@@ -138,13 +227,13 @@ loadTranslation result shared =
 
 viewLanguageItems : Shared -> (String -> msg) -> List (Html msg)
 viewLanguageItems shared toMsg =
-    [ "en", "pt-br", "es", "cat" ]
+    [ "en", "pt-br", "es", "cat", "amh" ]
         |> List.filter (\l -> not (String.startsWith l shared.language))
         |> List.sort
         |> List.map
             (\lang ->
                 button
-                    [ class "flex block px-4 py-2 text-gray justify-between items-center text-xs"
+                    [ class "flex px-4 py-2 text-gray justify-between items-center text-xs"
                     , onClick (toMsg lang)
                     ]
                     [ langFlag lang
@@ -158,18 +247,25 @@ langFlag st =
     let
         iconLink =
             if String.startsWith "cat" st then
-                "/icons/cat-lang.svg"
+                "/icons/flag-catalan.svg"
 
             else if String.startsWith "p" st then
-                "/icons/portuguese-lang.svg"
+                "/icons/flag-brazil.svg"
 
             else if String.startsWith "es" st then
-                "/icons/spain-lang.svg"
+                "/icons/flag-spain.svg"
+
+            else if String.startsWith "amh" st then
+                "/icons/flag-ethiopia.svg"
 
             else
-                "/icons/en-lang.svg"
+                "/icons/flag-usa.svg"
     in
-    img [ src iconLink, class "object-cover w-6 h-6 mr-4" ] []
+    img
+        [ class "object-cover rounded-full w-6 h-6 lang-flag mr-2"
+        , src iconLink
+        ]
+        []
 
 
 viewFullLoading : Html msg
@@ -179,16 +275,16 @@ viewFullLoading =
 
 
 viewFullError : Shared -> Http.Error -> msg -> String -> Html msg
-viewFullError shared err msg msgText =
+viewFullError shared _ msg msgText =
     div [ class "full-page-loading full-spinner-container" ]
         [ p [] [ text msgText ]
-        , button [ onClick msg ] [ text (t shared.translations "menu.try_again") ]
+        , button [ onClick msg ] [ text (I18Next.t shared.translations "menu.try_again") ]
         ]
 
 
 viewFullGraphqlError : Shared -> Graphql.Http.Error e -> msg -> String -> Html msg
-viewFullGraphqlError shared err msg msgText =
+viewFullGraphqlError shared _ msg msgText =
     div [ class "full-page-loading full-spinner-container" ]
         [ p [] [ text msgText ]
-        , button [ onClick msg ] [ text (t shared.translations "menu.try_again") ]
+        , button [ onClick msg ] [ text (I18Next.t shared.translations "menu.try_again") ]
         ]

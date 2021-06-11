@@ -1,13 +1,18 @@
 {
   "bespiral": "Cambiatus",
   "back": "Voltar",
+  "loading": {
+    "title": "Aguarde um instante",
+    "subtitle": "Estamos processando sua solicitação"
+  },
   "menu": {
     "title": "Menu",
-    "my_communities": "Bem vindo de volta, ",
+    "welcome_to": "Bem vindo a {{community_name}}",
+    "my_communities": "Bem vindo a ",
     "dashboard": "Painel",
     "news": "Novidades",
     "learn": "Aprender",
-    "shop": "Loja",
+    "shop": "Ofertas",
     "faq": "FAQ",
     "profile": "Perfil",
     "invite": "Convite",
@@ -19,7 +24,20 @@
     "view_all": "Ver Tudo",
     "more": "Mais",
     "logout": "Sair",
-    "search": "Procurar comunidades, amigos ...",
+    "search": {
+      "placeholder": "Encontre ações e ofertas",
+      "recentlyHeader": "Pesquisado recentemente",
+      "notFoundLabel": "Você pesquisou por",
+      "notFoundResults": "Nenhum resultado foi encontrado",
+      "overviewHeader": "Aqui está o que nós encontramos",
+      "overviewShow": "Mostrar",
+      "overviewFound": "Nós achamos",
+      "offer": "oferta",
+      "offers": "ofertas",
+      "action": "ação",
+      "actions": "ações",
+      "gain": "Você ganha"
+    },
     "explore": "Explorar",
     "communities": "Comunidades",
     "welcome_message": "Olá, {{user_name}} ",
@@ -35,7 +53,11 @@
     "try_again": "Tente novamente",
     "coming_soon": "Em Breve",
     "my_account": "Minha conta",
-    "languages": "Linguagens"
+    "languages": "Linguagens",
+    "community_selector": {
+      "title": "Alterar comunidade",
+      "body": "Selecione uma comunidade"
+    }
   },
   "edit": {
     "input_counter": "{{current}} de {{max}}"
@@ -47,8 +69,10 @@
         "negative": "O número deve ser negativo",
         "greater_than": "O número deve ser maior do que {{base}}",
         "greater_than_or_equal": "O número deve ser maior ou igual a {{base}}",
+        "length_greater_than_or_equal": "Escolha ao menos {{count}} itens",
         "lower_than": "O número deve ser menor do que {{base}}",
-        "lower_than_or_equal": "O número deve ser menor ou igual a {{base}}"
+        "lower_than_or_equal": "O número deve ser menor ou igual a {{base}}",
+        "is_odd": "O número deve ser ímpar"
       },
       "date": {
         "invalid": "A data está inválida. Use 'mm/dd/aaaa'"
@@ -66,19 +90,73 @@
       }
     },
     "objective": {
-        "invalid_id": "ID do objetivo inválido "
+      "invalid_id": "ID do objetivo inválido "
+    },
+    "clipboard": {
+      "permissionDenied": "Você precisa nos dar permissão para colar! Tente mudar as configurações no botão de cadeado ou informações",
+      "paste": {
+        "notSupported": "Seu navegador não suporta colar, por favor cole manualmente"
+      }
     },
     "pageNotFound": "Pagina não encontrada",
     "required": "Parece que voce esqueceu de preencher esse.",
+    "email": "Por favor, use um email válido.",
     "tooShort": "Muito curto. Deve ter pelo menos {{minLength}} caracteres.",
     "tooLong": "Muito longo. Deve ter no maximo {{maxLength}} caracteres.",
-    "invalidChar": "Caractere invalido: '{{invalidChar}}'.",
+    "invalidChar": "Caractere inválido. Use apenas letras de A a Z e números de 1 a 5.",
+    "notAllowedChar": "'{{char}}' não é permitido. Use apenas letras de A a Z e números de 1 a 5.",
     "alreadyTaken": "Esse ja esta em uso. Por favor, tente outro.",
     "notMember": "Esse usuario não é membro",
     "chooseOrUploadLogo": "Escolha ou envie um logo.",
+    "waitForLogoUpload": "Espere até o logo ser enviado",
     "invalidSymbol": "Simbolo inválido.",
     "unknown": "Opa. Algo de errado aconteceu =(.",
-    "accountNotFound": "Conta não encontrada. Tem certeza que criou uma conta com essa chave?"
+    "accountNotFound": "Conta não encontrada. Tem certeza que criou uma conta com essa chave?",
+    "invalidKey": "Chave inválida",
+    "invalidPin": "PIN inválido",
+    "unavailablePin": "PIN está indisponível",
+    "phone": "Por favor insira um número de telefone válido",
+    "invalid_image_file": "Erro ao fazer upload de imagem",
+    "zipcode": "CEP inválido",
+    "contracts": {
+      "transfer": {
+        "cannot transfer to self": "Não é possível transferir para si mesmo",
+        "destination account doesn't exists": "A conta de destino não existe",
+        "token with given symbol doesn't exists": "Nenhuma moeda com o símbolo fornecido foi encontrada",
+        "invalid quantity": "Quantidade inválida",
+        "quantity must be positive": "Quantidade deve ser positiva",
+        "symbol precision mismatch": "Precisão do símbolo incompatível",
+        "memo has more than 256 bytes": "a mensagem não pode ter mais que 256 carácteres",
+        "from account doesn't belong to the community": "A conta de origem não pertence à comunidade",
+        "to account doesn't belong to the community": "A conta de destino não pertence à comunidade",
+        "The sale creator (to) account doesn't exists": "A conta do criador da venda (para) não existe",
+        "Can't sale for yourself": "Não pode vender para você",
+        "Can't find any sale with given sale_id": "Não é possível encontrar nenhuma venda com determinado sale_id",
+        "Invalid number of units, must be greater than 0": "Número de unidades inválido, deve ser maior que 0",
+        "Sale doesn't have that many units available": "A venda não tem tantas unidades disponíveis",
+        "Amount offered doesn't correspond to expected value": "O valor oferecido não corresponde ao valor esperado",
+        "Quantity must be the same as the sale price": "A quantidade deve ser igual ao preço de venda",
+        "Can't find community with given Symbol": "Não é possível encontrar a comunidade com o símbolo fornecido",
+        "This community don't have objectives enabled.": "Esta comunidade não tem objetivos habilitados.",
+        "You can't use transfersale to this sale if you aren't part of the community": "Você não pode usar transfersale para esta venda se você não fizer parte da comunidade",
+        "Sale creator and sale doesn't match": "O criador da venda e a venda não correspondem",
+        "Invalid number of units": "Número inválido de unidades",
+        "overdrawn community limit": "Saldo insuficiente para realizar essa transferência"
+      },
+      "verifyclaim": {
+        "Can't vote on already verified claim": "Não é possível votar em uma reivindicação já verificada",
+        "This is action is already completed, can't verify claim": "Esta ação já foi concluída, não é possível verificar a reivindicação",
+        "There are no usages left for this action": "Não há usos restantes para esta ação",
+        "Can't find claim with given claim_id": "Não é possível encontrar a reivindicação com o claim_id fornecido",
+        "Can't find action with given claim_id": "Não é possível encontrar ação com o claim_id fornecido",
+        "Can't find objective with given claim_id": "Não é possível encontrar o objetivo com o claim_id fornecido",
+        "Can't find community with given claim_id": "Não é possível encontrar a comunidade com o claim_id fornecido",
+        "This community don't have objectives enabled.": "Esta comunidade não tem objetivos habilitados.",
+        "Verifier is not in the action validator list": "O verificador não está na lista de validadores de ação",
+        "Deadline exceeded": "Prazo excedido",
+        "The verifier cannot check the same claim more than once": "O verificador não pode verificar a mesma reivindicação mais de uma vez"
+      }
+    }
   },
   "auth": {
     "title": "Use sua chave privada e PIN ou faça o login",
@@ -91,7 +169,11 @@
     "required": "Autenticação necessária para essa ação",
     "account_instr": "Apenas letras de a-z e números de 1-5",
     "pin_instr": "6 números",
+    "failed": "Falha na autenticação",
     "login": {
+      "modalFormTitle": "Insira seu PIN",
+      "enterPinToContinue": "Por favor, insira seu PIN de segurança atual para continuar.",
+      "continue": "Continuar",
       "loginTab": "Entrar",
       "registerTab": "Crie sua conta",
       "privateKeyMode": {
@@ -103,43 +185,115 @@
       },
       "wordsMode": {
         "input": {
+          "description": "Digite suas 12 palavras que você copiou e colou no registro.",
           "label": "Suas 12 palavras (você salvou ao criar sua conta)",
+          "placeholder": "Digite suas 12 palavras aqui",
           "tooltip": "Você também pode usar sua CHAVE PRIVADA",
-          "toggle": "Eu quero usar a chave privada"
+          "toggle": "Eu quero usar a chave privada",
+          "notPassphraseError": "Por favor, digite 12 palavras",
+          "notLatinLettersError": "Por favor, use apenas letras",
+          "atLeastThreeLettersError": "Todas as palavras devem ter ao menos 3 letras",
+          "paste": "Colar",
+          "pasted": "Colado"
         }
       },
       "submit": "Entrar",
+      "submitting": "Entrando...",
       "register": "Ainda não tem uma conta? ",
       "registerLink": "Crie agora"
     },
     "pin": {
-      "label": "PIN de segurança (apenas números)",
-      "tooltip": "O PIN deve conter 6 números, para sua segurança, insira o PIN que você criou toda vez que o solicitarmos"
+      "instruction": {
+        "nowCreate": "Legal, agora crie um",
+        "sixDigitPin": "PIN de seis dígitos",
+        "thePin": "O PIN",
+        "notPassword": "não é uma senha",
+        "eachLogin": "e você pode alterá-la a cada login."
+      },
+      "toggle": {
+        "show": "Mostrar",
+        "hide": "Ocultar"
+      },
+      "label": "Crie um novo PIN de seis dígitos",
+      "tooltip": "O PIN deve conter 6 números, para sua segurança, insira o PIN que você criou toda vez que o solicitarmos",
+      "shouldHaveSixDigitsError": "O PIN deve ter 6 dígitos",
+      "pin": "PIN",
+      "confirmPin": "Confirmar PIN",
+      "pinCharError": "Seu PIN deve usar apenas números"
+    },
+    "pinPopup": {
+      "label": "Seu PIN de seis dígitos"
     },
     "pinConfirmation": {
       "label": "Digite o PIN novamente",
-      "tooltip": ""
+      "tooltip": "",
+      "differsFromPinError": "Digite o mesmo PIN acima"
     }
   },
   "register": {
     "registerTab": "Crie sua conta",
     "loginTab": "Entrar",
     "form": {
-      "title": "Crie sua conta no Cambiatus e aproveite nossa plataforma",
+      "step": "Passo {{stepNum}} de 2",
+      "step1_title": "Informações básicas",
+      "step2_title": "12 palavras",
       "name": {
         "label": "Nome completo",
         "tooltip": "",
-        "placeholder": ""
+        "placeholder": "Ex.: Arlene Warren"
       },
       "email": {
         "label": "Email",
         "tooltip": "",
+        "placeholder": "Ex.: arlene_warren@email.com"
+      },
+      "phone": {
+        "label": "Telefone",
+        "tooltip": "Ex.: 12345678",
+        "placeholder": "Ex.: 12345678"
+      },
+      "street": {
+        "label": "Rua",
+        "tooltip": "",
         "placeholder": ""
       },
+      "number": {
+        "label": "Número",
+        "tooltip": "",
+        "placeholder": ""
+      },
+      "zip": {
+        "label": "CEP",
+        "tooltip": "",
+        "placeholder": ""
+      },
+      "document": {
+        "type": "Tipo de Documento",
+        "cedula_de_identidad": {
+          "label": "Número de Segurança Social",
+          "placeholder": "Insira os 9 dígitos",
+          "maximum": "9"
+        },
+        "dimex": {
+          "label": "Número Dimex",
+          "placeholder": "Insira os 11 ou 12 dígitos",
+          "maximum": "12"
+        },
+        "nite": {
+          "label": "Número Nite",
+          "placeholder": "Insira os 10 dígitos",
+          "maximum": "10"
+        },
+        "errorInvalid": "Por favor, use um número de documento válido."
+      },
+      "types": {
+        "natural": "Pessoa Física",
+        "juridical": "Pessoa Jurídica"
+      },
       "account": {
-        "label": "Crie um nome de usuário com exatamente 12 caracteres",
+        "label": "Crie um nome de usuário com exatamente 12 caracteres (somente letras de a-z e números de 1 a 5)",
         "tooltip": "O nome de usuário será como você será conhecido na plataforma pelos outros participantes, deve ter exatamente 12 caracteres.",
-        "placeholder": "Somente letras de a-z e números de 1 a 5"
+        "placeholder": "Ex.: arlenewa1224"
       },
       "accountCharError": "Caractere invalido encontrado. Use apenas letras de 'a' a 'z' e numeros entre 1 e 5",
       "pin": "PIN",
@@ -147,7 +301,36 @@
       "pinCharError": "O PIN deve ter apenas numeros",
       "pinConfirmError": "Por favor entre o mesmo PIN",
       "checkingAvailability": "Checando disponibilidade da conta",
-      "button": "Criar"
+      "button": "Criar",
+      "company_type": "Tipo de Empresa",
+      "company": {
+        "mipyme": {
+          "name": "MIPYME",
+          "label": "MIPYME",
+          "placeholder": "Entre os 10 dígitos",
+          "maximum": "10"
+        },
+        "gran_empresa": {
+          "label": "Corporação",
+          "name": "Corporação Number",
+          "placeholder": "Entre os 10 dígitos",
+          "maximum": "10"
+        }
+      },
+      "register_tooltip": "Como gostaria de se registrar?",
+      "corporation": "Corporação",
+      "city": "Cidade",
+      "state": "Estado",
+      "district": "Distrito",
+      "select": {
+        "state": "Selecione o Estado",
+        "city": "Selecione a cidade",
+        "district": "Selecione o distrito"
+      },
+      "error": {
+        "kyc_problem": "Não é possível salvar o KYC. Por favor, verifique seus dados e tente novamente!",
+        "address_problem": "Não é possível salvar o endereço. Por favor, verifique seus dados e tente novamente!"
+      }
     },
     "login": "Já tem uma conta? ",
     "authLink": "Login",
@@ -155,16 +338,17 @@
       "title": "Opa. Algo de errado aconteceu enquanto criavamos sua conta"
     },
     "account_created": {
-       "congrats": "Parabéns",
-        "account": "Sua conta foi",
-        "created": "criada ;)",
-        "welcome_message": "Seja bem-vindo {{username}}, você sempre poderá acessar o Cambiatus com este dispositivo de maneira simples e segura, mas se quiser usar um computador, smartphone ou tablet diferente, precisará ter as seguintes informações em mãos:",
-        "twelve_words": "Suas 12 palavras",
-        "private_key": "Sua chave privada",
-        "recommendation": "Recomendamos que você salve essas informações clicando no botão abaixo. Se você perder, não poderá fazer login novamente na sua conta.",
-        "download": "Salvar chave privada e 12 palavras",
-        "instructions": "Você salvará a chave privada e as 12 palavras em seu computador no formato PDF."
-     }
+      "greet": "Ei",
+      "last_step": "esse é o último passo e o mais importante",
+      "copy": "copie",
+      "i_saved_words": "Copiei e colei em um local seguro as 12 palavras que Cambiatus pediu",
+      "words_copied": "foram copiadas para a área de transferência",
+      "twelve_words": "Suas 12 palavras",
+      "private_key": "Sua chave privada",
+      "recommendation": "Recomendamos que você salve essas informações clicando no botão abaixo. Se você perder, não poderá fazer login novamente na sua conta.",
+      "download": "Criar a minha conta",
+      "instructions": "Copie e cole as 12 palavras abaixo em um local seguro. Essa é a sua única chance de fazê-lo; em caso de perda das palavras, você não poderá mais recuperar ou acessar sua conta"
+    }
   },
   "account": {
     "my_wallet": {
@@ -178,11 +362,12 @@
       },
       "transfer": {
         "title": "Enviando {{symbol}}",
-        "send_to": "Enviar para:",
+        "error": "Falha na transferência",
+        "send_to": "Transferir para",
         "send_to_placeholder": "Conta do seu amigo",
-        "amount": "Quantidade:",
+        "amount": "Quantidade",
         "amount_placeholder": "0.00",
-        "memo": "Observação:",
+        "memo": "Mensagem (opcional)",
         "memo_placeholder": "Obrigado pela ajuda",
         "submit": "Transferir"
       }
@@ -193,7 +378,12 @@
     "loading_error": "Algo de errado aconteceu ao carregar as transferências.",
     "no_transfers_yet": "Nenhuma transferência.",
     "info": "{{from}} transferiu {{value}} para {{to}}",
-    "you": "voce"
+    "you": "você",
+    "title": "Transferir",
+    "to_self": "Você não pode transferir para si mesmo",
+    "no_profile": "Selecione um usuário",
+    "no_amount": "Insira uma quantidade",
+    "memo_too_long": "A mensagem não pode ser maior do que {{maxlength}} caracteres"
   },
   "notifications": {
     "title": "Notificações",
@@ -213,8 +403,12 @@
   "community": {
     "title": "Comunidades",
     "create_button": "Criar uma comunidade",
+    "not_found": "Comunidade não encontrada",
+    "error_loading": "Erro ao carregar comunidade",
+    "error_saving": "Erro ao salvar comunidade",
     "create": {
       "title": "Criar comunidade",
+      "success": "Comunidade salva com sucesso",
       "labels": {
         "title": "Titulo",
         "symbol": "Simbolo",
@@ -244,21 +438,44 @@
     },
     "index": {
       "created_by": "Criado por {{account_name}}",
-      "members": "{{quantity}} Membros",
-      "transfers": "{{quantity}} Transferências"
+      "members": "Membros",
+      "claims": "Reivindicações",
+      "products": "Ofertas",
+      "orders": "Pedidos",
+      "transfers": "Transferências"
     },
     "invite": {
-      "title": "Convide seus amigos e amigas",
+      "title": "Convide um amigo",
       "subtitle": "Convide seus amigos e amigas para {{community_title}}",
-      "labels": {
-        "emails": "Emails, separados por virgula"
-      },
-      "placeholders": {
-        "emails": "Preencha os emails, separados por virgula"
-      },
+      "label": "Envie essa URl para seus amigos",
       "submit": "Envie os convites",
       "succeed": "Convite enviado com sucesso",
-      "failed": "Falha ao enviar convite"
+      "failed": "Falha ao enviar convite",
+      "copy": "Copiar",
+      "copied": "Copiado!",
+      "kycRequired": "Esta comunidade requer que seus membros tenham mais algumas informações. Por favor, preencha os campos abaixo."
+    },
+    "invitation": {
+      "title": "convidou você para fazer parte da comunidade",
+      "subtitle": "Gostaria de se juntar a",
+      "yes": "Sim, participar",
+      "no": "Não, obrigado",
+      "already_member": "Você já é membro desta comunidade!",
+      "choose_community_tip": "Você sempre pode escolher {{communityTitle}} no menu suspenso no canto superior esquerdo do site.",
+      "modal": {
+        "title": "Atenção",
+        "body": "Você realmente não deseja participar da comunidade?",
+        "yes": "Sim, participar",
+        "no": "Não, cancelar"
+      }
+    },
+    "join": {
+      "title_generic": "Entrar na comunidade",
+      "title_with_community": "Entrar em {{community_name}}",
+      "member_count": "{{member_count}} membros",
+      "only_invited": "Essa comunidade permite apenas convidados",
+      "already_member": "Já sou membro",
+      "visit_website": "Visitar o site"
     },
     "details": {
       "creator": "Criador(a)",
@@ -267,20 +484,36 @@
     },
     "objectives": {
       "title": "Objetivo",
+      "create_success": "Objetivo criado com sucesso",
       "title_plural": "Objetivos e Ações",
       "subtitle": "{{objectives}} objetivos e {{actions}} ações",
       "new": "Criar novo objetivo",
       "action_count": "{{actions}} ações",
+      "complete": "Completo",
+      "edit": "Editar objetivo",
       "editor": {
         "not_found": "Não encontrado",
         "error": "Ops algo deu errado!",
         "description_label": "Qual o seu objetivo?",
         "description_placeholder": "Defina uma meta que ajude a resolver o problema da comunidade.",
-        "submit": "Salvar"
+        "submit": "Salvar",
+        "mark_as_complete": "Marcar como completo",
+        "error_marking_as_complete": "Algo de errado aconteceu ao completar seu objetivo",
+        "modal": {
+          "title": "Marcar objetivo como completo",
+          "body": "Não é possível reverter após completar um objetivo. Ações deste objetivo não estarão mais disponíveis para análise. Tem certeza que deseja completar esse objetivo?",
+          "confirm": "Sim",
+          "cancel": "Não"
+        }
+      },
+      "disabled": {
+        "description": "Reivindicações, ações e objetivos estão desativados nesta comunidade."
       }
     },
     "actions": {
       "title": "Ação",
+      "create_success": "Ação criada com sucesso",
+      "save_success": "A ação foi salva com sucesso",
       "last_title": "Últimas Ações",
       "loading_error": "Alguma coisa deu errado ao carregar as ações.",
       "no_actions_yet": "Nenhuma ação.",
@@ -290,7 +523,7 @@
       "aumatically_verified_by": "Automaticamente verificado por",
       "validation_reward": "Recompensa por validar",
       "validation_reward_none": "Nada",
-      "new": "Criar nova ação",
+      "new": "Criar ação",
       "description_label": "Quais ações precisam ser feitas para alcancar essa meta?",
       "reward_label": "O usuario vai ganhar essa recompensa por completar a ação.",
       "verification_label": "Como essa ação sera verificada?",
@@ -307,6 +540,16 @@
       "or": " ou ",
       "completed": "Completa",
       "closed": "Encerrada",
+      "edit": "Editar ação",
+      "proof": {
+        "title": "Esta ação requer uma prova fotográfica",
+        "upload": "Prova",
+        "upload_full": "ver prova inteira",
+        "upload_hint": "Toque para tirar uma foto ou selecionar um arquivo PDF",
+        "code_period_label": "o código é válido para",
+        "no_upload_error": "Por favor, adicione uma foto ou arquivo PDF para confirmar sua reivindicação.",
+        "time_expired": "O tempo para a reclamação expirou."
+      },
       "form": {
         "not_found": "Ação não encontrada",
         "description_label": "Descrição",
@@ -314,26 +557,35 @@
         "validity_label": "Tipo de validade",
         "validation_on": "Expiração ativada,",
         "validation_off": "Expiração desativada,",
-        "validation_detail": "a ação estará disponível até que seja deletada",
+        "validation_detail": " a ação estará disponível até que seja deletada",
+        "validation_on_detail": " a ação estará disponível até uma data, quantidade ou ambos",
         "verification_label": "Precisa de verificação?",
         "verifiers_label": "Escolha os verificadores",
+        "verifiers_label_count": "Escolha ao menos {{count}} verificadores",
         "remove_verifier": "Remover",
         "verifiers_reward_label": "Recompensa para verificadores",
         "votes_label": "Número mínimo de votos",
         "tooltip_label": "O que é isso?",
         "date_validity": "Validade por data,",
-        "date_validity_details": "a ação vai terminar quando atingir uma data específica",
+        "date_validity_details": " a ação vai terminar quando atingir uma data específica",
         "quantity_validity": "Validade por quantidade de usos,",
-        "quantity_validity_details": "a ação vai terminar quando atingir uma determinada quantidade de usos",
+        "quantity_validity_details": " a ação vai terminar quando atingir uma determinada quantidade de usos",
         "no": "Não",
         "yes": "Sim",
         "automatic": "Automático,",
-        "automatic_detail": "recompensa o usuário imediatamente quando feita a reinvidicação",
+        "automatic_detail": " recompensa o usuário imediatamente quando feita a reivindicação",
         "manual": "Manual,",
-        "manual_detail": "recompensa o usuário somente após revisão e aprovação de outros membros",
+        "manual_detail": " recompensa o usuário somente após revisão e aprovação de outros membros",
         "verifier_placeholder": "Digite o nome de usuário",
+        "verifier_not_found": "Nenhum usuário encontrado",
+        "usages_placeholder": "Digite um número",
         "date_label": "Escolha a data",
         "quantity_label": "Escolha a quantidade de usos",
+        "proof_validation": "Validação de foto ou PDF",
+        "proof_validation_hint": "Os usuários devem enviar uma foto realizando a tarefa ou um arquivo PDF para que a reivindicação seja válida.",
+        "verification_code": "Código de verificação",
+        "verification_code_hint": "Os usuários terão que enviar um código de verificação exclusivo com a prova para que a reivindicação seja válida.",
+        "verification_instructions": "Escreva aqui instruções para os usuários",
         "usages_left_label": "Usos restantes",
         "mark_completed": "Finalizar ação",
         "errors": {
@@ -350,21 +602,54 @@
         "error": "A atividade não pode ser criada. Tente depois"
       }
     },
-    "claimAction": {
-      "title": "Reinvindicar",
-      "body": "Confirmar reinvindicação de ação?",
-      "yes": "Sim, reinvindicar",
-      "no": "Não, cancelar",
-      "success": "Reinvidicação concluída, aguarde as aprovações",
-      "failure": "Algo deu errado ao tentar realizar sua reinvidicação, tente novamente mais tarde"
-    },
     "verifyClaim": {
       "error": "Ocorreu um erro ao tentar processar sua validação. Tente novamente mais tarde"
+    },
+    "kyc": {
+      "title": "KYC",
+      "dataTitle": "Dados KYC",
+      "info": "A verificação KYC é o processo obrigatório de identificação e verificação da identidade do cliente ao abrir uma conta e periodicamente ao longo do tempo. Antes de habilitar este recurso, fale conosco para entender melhor.",
+      "phoneLabel": "Número de telefone",
+      "restriction": {
+        "title": "Desculpe, esta página é restrita",
+        "description": "Esta comunidade requer mais algumas informações de seus membros. Para ter acesso completo, por favor, preencha os campos KYC em seu perfil.",
+        "link": "Preencha seus dados KYC"
+      },
+      "delete": {
+        "label": "Excluir",
+        "confirmationHeader": "Exclua seus dados KYC",
+        "confirmationBody": "Depois de excluir esses dados, você não poderá participar de algumas comunidades. Você realmente deseja excluir seus dados KYC?",
+        "warning": "Importante: Depois de excluir esses dados, você não poderá participar de algumas comunidades.",
+        "confirm": "Sim",
+        "cancel": "Não",
+        "success": "Seus dados KYC foram excluídos com sucesso."
+      },
+      "add": {
+        "title": "Adicionar dados KYC",
+        "restricted": "Desculpe, você não pode editar seus dados KYC.",
+        "canRemove": "Você sempre pode remover essas informações de seu perfil se decidir fazer isso.",
+        "success": "Seus dados KYC foram salvos com sucesso."
+      }
     }
   },
   "profile": {
     "title": "Meu perfil",
     "my_transfers": "Minhas transferências",
+    "no_one": "Ninguém",
+    "edit_success": "Perfil salvo com sucesso",
+    "locations": "Localização",
+    "interests": "Interesses",
+    "12words": {
+      "title": "Minhas 12 palavras",
+      "button": "Baixar"
+    },
+    "pin": {
+      "title": "Meu PIN",
+      "button": "Trocar"
+    },
+    "changePin": "Troque seu PIN!",
+    "newPin": "Novo PIN",
+    "changePinPrompt": "Entre seu novo PIN de segurança com 6 dígitos.",
     "actions": {
       "edit": "Editar",
       "viewPrivatekey": "Ver chave privada"
@@ -393,18 +678,19 @@
       "push_notifications": "Habilitar notificações",
       "submit": "Salvar"
     },
-    "badge": {
-      "title": "Conquistas",
-      "currencyStarter": " Criador de Moeda",
-      "developer": "Developer",
-      "seedTeam": "Time Seed",
-      "mentor": "Mentor"
+    "claims": {
+      "title": "Minhas reivindicações",
+      "not_found": {
+        "title": "Minhas reivindicações",
+        "subtitle": "Nenhum usuário encontrado"
+      },
+      "empty_results": "Nenhuma reivindicação ainda"
     }
   },
   "shop": {
     "filter": "Filtro",
     "units_label": "Quantidade em estoque",
-    "title": "Loja",
+    "title": "Ofertas",
     "subtitle": "Compre e vende em sua comunidade",
     "description": "Aqui você pode usar suas moedas para comprar serviços e produtos ou receber vendendo seus próprios produtos e serviços",
     "all_offers": "Todas as ofertas",
@@ -416,6 +702,8 @@
     "message_placeholder": "Digite sua mensagem aqui ou envie diretamente por Whatsapp ou chat.",
     "create_offer": "Criar oferta",
     "edit_offer": "Editar oferta",
+    "create_offer_success": "Oferta criada com sucesso!",
+    "delete_offer_success": "Oferta removida com sucesso",
     "unauthorized": "Você não tem autorização para editar essa venda",
     "photo_label": "Enviar imagem",
     "what_label": "O que voce esta vendendo?",
@@ -439,11 +727,33 @@
       "quantity_label": "Valor",
       "memo_label": "Comentários (opcional)",
       "default_memo": "Obrigado pela ajuda!",
-      "submit": "Comprar"
+      "submit": "Comprar",
+      "success": "Compra bem sucedida!",
+      "errors": {
+        "unitEmpty": "Unidade não pode estar vazia",
+        "unitTooLow": "A unidade é muito baixa, deve ser pelo menos 1",
+        "unitTooHigh": "Unidades insuficientes disponíveis",
+        "unitNotOnlyNumbers": "Somente números são permitidos",
+        "memoEmpty": "O memorando não pode estar vazio",
+        "memoTooLong": "O memorando é muito longo, o máximo é 256 caracteres"
+      }
+    },
+    "delete": "Excluir",
+    "delete_modal": {
+      "title": "Excluir",
+      "body": "Tem certeza de que deseja excluir este item?",
+      "confirm": "Sim",
+      "cancel": "Não"
+    },
+    "disabled": {
+      "description": "A loja está desativada nesta comunidade."
     }
   },
   "dashboard": {
     "back": "Voltar",
+    "transfer": "Transferir para um amigo",
+    "explore": "Como ganhar {{symbol}}",
+    "invite": "Convide seus amigos",
     "sorry": "Desculpe!",
     "action_rejected": "Sua ação foi rejeitada",
     "please_try_again": "Por favor tente novamente",
@@ -456,7 +766,7 @@
     "next": "Próximo",
     "your_action": "Sua ação:",
     "add_comment": "Adicionar um comentário",
-    "claim": "Reinvidicar",
+    "claim": "Reivindicar",
     "wait_verification": "Espere pela verificação",
     "you_won": "Boa notícia! Você ganhou:",
     "you_rejected": "Você rejeitou a ação",
@@ -465,32 +775,100 @@
     "verification": "Verificação",
     "your_reward": "Sua recompensa",
     "action": "Ação",
-    "reject": "Rejeitar",
-    "verify": "Verificar",
+    "reject": "Reprovar",
+    "verify": "Aprovar",
     "closed": "fechados",
+    "my_claims": {
+      "1": "Minhas ",
+      "2": "Reivindicações",
+      "go": "ir"
+    },
+    "my_offers": {
+      "1": "Minhas ",
+      "2": "Ofertas",
+      "go": "Ir"
+    },
+    "analysis": {
+      "title": {
+        "1": "Ações",
+        "2": "para análise"
+      },
+      "empty": {
+        "1": "Wooow",
+        "2": ", bom trabalho.",
+        "3": "Você finalizou tudo"
+      },
+      "all": "Todas"
+    },
     "activities": {
       "title": "Atividades para sua análise",
       "no_activities_yet": "Nenhuma atividade."
+    },
+    "check_claim": {
+      "body": "Confirmar reinvindicação de ação?",
+      "yes": "Sim, reinvindicar",
+      "no": "Não, cancelar",
+      "success": "Parabéns! Falta pouco para ganhar seus {{symbolCode}}. Estamos revisando sua ação.",
+      "failure": "Algo deu errado ao tentar realizar sua reivindicação, tente novamente mais tarde"
     }
   },
-  "verify_claim": {
-    "pending": "Pendente",
-    "disapproved": "Reprovado",
+  "all_analysis": {
+    "title": "Todas as ações para análise",
+    "more_details": "Mais detalhes",
+    "all": "Todos",
     "approved": "Aprovado",
+    "pending": "Sob análise",
+    "disapproved": "Reprovado",
+    "empty": "Nenhum resultado, ",
+    "clear_filters": "limpar os filtros",
+    "show_more": "Mostrar próximos 16 items",
+    "error": "Algo deu errado ao carregar ações",
+    "filter": {
+      "user": "Usuário",
+      "status": {
+        "label": "Estado da ação",
+        "pending_review": "Sob análise (meu voto está pendente)"
+      },
+      "sort": {
+        "asc": "Ordenação ascendente",
+        "desc": "Ordenação descendente"
+      }
+    }
+  },
+  "claim": {
+    "title_under_review": {
+      "1": "Esta reinvindicação está",
+      "2": "em análise",
+      "3": ", outros membros ainda precisam votar"
+    },
+    "title_approved": {
+      "1": "Esta reinvindicação foi",
+      "2": "aprovada"
+    },
+    "title_rejected": {
+      "1": "Esta reinvindicação foi",
+      "2": "rejeitada"
+    },
+    "title_action_completed": "Esta reinvidicação está pendente, no entanto, como a ação foi concluída, não é possível votar",
+    "title_action_closed": "Esta reinvidicação está pendente, no entanto, como a ação foi encerrada, não é possível votar",
+    "pending": "Pendente",
+    "disapproved_by": "Reprovado por",
+    "approved_by": "Aprovado por",
     "reward": "Você ganhou: {{value}}",
     "sub_wait_1": "Aguarde, esta reivindicação está sendo analisada por outros usuários.",
     "sub_wait_2": "Quando terminar, você receberá sua recompensa.",
     "objective": "Objetivo",
     "action": "Ação",
     "claimer": "Reivindicado por",
-    "date": "Data",
+    "date": "Data da reinvindicação",
     "claimer_reward": "Recompensa do usuário",
     "your_reward": "Sua recompensa",
     "disapprove": "Reprovar",
     "approve": "Aprovar",
     "no_results_found": "Nenhum resultado encontrado",
+    "voteTitle": "Você aprova ou desaprova esta ação?",
     "modal": {
-      "title": "Reivindicação",
+      "title": "Sob análise",
       "message_disapprove": "Você realmente deseja reprovar esta reivindicação?",
       "message_approve": "Você realmente deseja aprovar esta reivindicação?",
       "primary_disapprove": "sim, reprovar",
@@ -502,7 +880,7 @@
     "title": "Transferido",
     "transfer_success": "Transferência realizada com sucesso!",
     "receive_success": "Recebido com sucesso!",
-    "date": "Data",
+    "date": "Data da transação",
     "message": "mensagem",
     "community": "Comunidade",
     "received": "Recebida",
@@ -510,6 +888,166 @@
     "error": {
       "invalid_id": " não é um ID de transferência válido"
     },
-    "you": "você"
+    "you": "você",
+    "my_balance": "Meu saldo",
+    "transaction_id": {
+      "title": "ID da transação",
+      "body": "Esse ID garante a autenticidade da transação se ambos os lados tiverem os mesmos emojis."
+    }
+  },
+  "settings": {
+    "success": "Configurações salvas com sucesso",
+    "community_info": {
+      "title": "Informações da Comunidade",
+      "description": "Logo, nome, descrição, url",
+      "logo": {
+        "title": "Logo da comunidade",
+        "guidance": "Orientação sobre a Logo",
+        "description": "Seu arquivo deve estar no formato PNG, JPG ou SVG. Ele deve medir 80px em largura e 80px em altura para ser melhor visualizado na interface."
+      },
+      "invitation": {
+        "title": "Acesso à comunidade",
+        "guidance": "Orientação sobre o Acesso à Comunidade",
+        "description": "Quando a comunidade precisa de convites, novos membros só conseguem acesso através de um convite."
+      },
+      "cover_photo": {
+        "title": "Foto de capa da comunidade",
+        "description": "Use uma foto de boa qualidade"
+      },
+      "url": {
+        "title": "URL personalizado da comunidade",
+        "guidance": "Orientação sobre o URL personalizado"
+      },
+      "fields": {
+        "name": "Nome da comunidade",
+        "description": "Descreva a comunidade",
+        "website": "Site da comunidade",
+        "invitation": "Convite"
+      },
+      "placeholders": {
+        "name": "Dê um nome à comunidade",
+        "description": "Diga algo sobre a comunidade",
+        "url": "Escolha um URL personalizado"
+      },
+      "errors": {
+        "logo_upload": "Houve um erro ao fazer o upload da logo",
+        "cover_upload": "Houve um erro ao carregar a imagem de capa",
+        "name": {
+          "blank": "A comunidade precisa de um nome"
+        },
+        "description": {
+          "blank": "A comunidade precisa de uma descrição"
+        },
+        "website": {
+          "invalid": "Por favor insira um site válido"
+        },
+        "url": {
+          "blank": "A communidade precisa de uma URL",
+          "invalid_char": "Não use caracteres especiais",
+          "invalid_case": "Somente letras minúsculas são permitidas",
+          "too_short": "O URL precisa de pelo menos 2 caracteres",
+          "already_taken": "O URL que você escolheu já está sendo usado"
+        }
+      },
+      "constraints": {
+        "length": "Maximo de 30 caractéres.",
+        "characters": "Use letras de a a z, e números de 0 a 9.",
+        "donts": "Não: use palavrões; use letra maiúscula; use caractéres especiais e letras com acentos. Ex. @!?:;âãá."
+      }
+    },
+    "community_currency": {
+      "title": "Moeda",
+      "decimal_places": "Casas decimais",
+      "format": "Esse é o exemplo da sua moeda",
+      "supports_decimal_places": "Sua moeda suporta {{amount}} casas decimais",
+      "token_type": "Tipo",
+      "expiry": "Expiração",
+      "natural_expiration_period": "Prazo de expiração de pessoa física",
+      "juridical_expiration_period": "Prazo de expiração de pessoa jurídica",
+      "renovation_amount": "Valor de renovação",
+      "expiryopts_not_found": "Não foi possível encontrar as opções de expiração para seu token",
+      "seconds": "segundos"
+    },
+    "actions": {
+      "title": "Objetivos e Ações",
+      "description": ""
+    },
+    "team": {
+      "title": "Time",
+      "description": "Construção de times"
+    },
+    "features": {
+      "title": "Recursos",
+      "description": "Ações, loja",
+      "enabled": "Habilitado",
+      "disabled": "Desabilitado"
+    }
+  },
+  "payment_history": {
+    "title": "Histórico de pagamento",
+    "user": "Usuário",
+    "date": "Data",
+    "more": "Mostre mais",
+    "no_transfers_found": "Nenhuma transferência foi encontrada de acordo com seus critérios.",
+    "pick_date": "Escolha uma data..."
+  },
+  "contact_modal": {
+    "new": "Novo",
+    "title": "Adicione seu Número de Telefone",
+    "footer": "Você pode fazer isso mais tarde na área do perfil"
+  },
+  "contact_form": {
+    "country": "País",
+    "contact_type": "Tipo de contato",
+    "error": "Algo deu errado ao adicionar seu contato",
+    "submit_multiple": "Salvar",
+    "profile_loading_failed": "Algo de errado aconteceu ao carregar seu perfil",
+    "options": "Opções de Contato",
+    "types": {
+      "phone": "Telefone",
+      "instagram": "Instagram",
+      "telegram": "Telegram",
+      "whatsapp": "Whatsapp"
+    },
+    "phone": {
+      "label": "Número de Telefone (com DDD)",
+      "placeholder": "Ex.: {{example_number}}",
+      "submit": "Adicionar Número de Telefone"
+    },
+    "username": {
+      "label": "Nome de Usuário",
+      "placeholder": "Ex.: cambiatus",
+      "submit": "Adicionar Perfil"
+    },
+    "validation": {
+      "phone": {
+        "blank": "Por favor insira seu número de telefone",
+        "invalid": "Por favor insira um número de telefone válido"
+      },
+      "username": {
+        "blank": "Por favor insira seu perfil",
+        "invalid": "Por favor insira um perfil válido"
+      }
+    },
+    "feedback": {
+      "single": {
+        "success": "Seu contato foi salvo com sucesso",
+        "failure": "Algo deu errado ao tentar salvar seu contato"
+      },
+      "multiple": {
+        "success": "Seus contatos foram salvos com sucesso",
+        "failure": "Algo deu errado ao tentar salvar seus contatos"
+      },
+      "delete": {
+        "success": "Seu contato foi removido com sucesso",
+        "failure": "Algo deu errado ao tentar excluir seu contato"
+      }
+    },
+    "delete": {
+      "title": "Excluir",
+      "body": "Quer mesmo excluir sua informação de contato?",
+      "cancel": "Não",
+      "accept": "Sim"
+    }
   }
 }

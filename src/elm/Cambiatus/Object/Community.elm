@@ -19,6 +19,21 @@ import Graphql.SelectionSet exposing (SelectionSet)
 import Json.Decode as Decode
 
 
+actionCount : SelectionSet Int Cambiatus.Object.Community
+actionCount =
+    Object.selectionForField "Int" "actionCount" [] Decode.int
+
+
+autoInvite : SelectionSet Bool Cambiatus.Object.Community
+autoInvite =
+    Object.selectionForField "Bool" "autoInvite" [] Decode.bool
+
+
+claimCount : SelectionSet Int Cambiatus.Object.Community
+claimCount =
+    Object.selectionForField "Int" "claimCount" [] Decode.int
+
+
 createdAt : SelectionSet Cambiatus.ScalarCodecs.DateTime Cambiatus.Object.Community
 createdAt =
     Object.selectionForField "ScalarCodecs.DateTime" "createdAt" [] (Cambiatus.ScalarCodecs.codecs |> Cambiatus.Scalar.unwrapCodecs |> .codecDateTime |> .decoder)
@@ -47,6 +62,21 @@ creator =
 description : SelectionSet String Cambiatus.Object.Community
 description =
     Object.selectionForField "String" "description" [] Decode.string
+
+
+hasKyc : SelectionSet Bool Cambiatus.Object.Community
+hasKyc =
+    Object.selectionForField "Bool" "hasKyc" [] Decode.bool
+
+
+hasObjectives : SelectionSet Bool Cambiatus.Object.Community
+hasObjectives =
+    Object.selectionForField "Bool" "hasObjectives" [] Decode.bool
+
+
+hasShop : SelectionSet Bool Cambiatus.Object.Community
+hasShop =
+    Object.selectionForField "Bool" "hasShop" [] Decode.bool
 
 
 invitedReward : SelectionSet Float Cambiatus.Object.Community
@@ -79,7 +109,9 @@ memberCount =
     Object.selectionForField "Int" "memberCount" [] Decode.int
 
 
-members : SelectionSet decodesTo Cambiatus.Object.Profile -> SelectionSet (List decodesTo) Cambiatus.Object.Community
+members :
+    SelectionSet decodesTo Cambiatus.Object.User
+    -> SelectionSet (List decodesTo) Cambiatus.Object.Community
 members object_ =
     Object.selectionForCompositeField "members" [] object_ (identity >> Decode.list)
 
@@ -89,7 +121,9 @@ minBalance =
     Object.selectionForField "(Maybe Float)" "minBalance" [] (Decode.float |> Decode.nullable)
 
 
-mints : SelectionSet decodesTo Cambiatus.Object.Mint -> SelectionSet (List decodesTo) Cambiatus.Object.Community
+mints :
+    SelectionSet decodesTo Cambiatus.Object.Mint
+    -> SelectionSet (List decodesTo) Cambiatus.Object.Community
 mints object_ =
     Object.selectionForCompositeField "mints" [] object_ (identity >> Decode.list)
 
@@ -99,9 +133,35 @@ name =
     Object.selectionForField "String" "name" [] Decode.string
 
 
-objectives : SelectionSet decodesTo Cambiatus.Object.Objective -> SelectionSet (List decodesTo) Cambiatus.Object.Community
+objectives :
+    SelectionSet decodesTo Cambiatus.Object.Objective
+    -> SelectionSet (List decodesTo) Cambiatus.Object.Community
 objectives object_ =
     Object.selectionForCompositeField "objectives" [] object_ (identity >> Decode.list)
+
+
+orderCount : SelectionSet Int Cambiatus.Object.Community
+orderCount =
+    Object.selectionForField "Int" "orderCount" [] Decode.int
+
+
+orders :
+    SelectionSet decodesTo Cambiatus.Object.Order
+    -> SelectionSet (List decodesTo) Cambiatus.Object.Community
+orders object_ =
+    Object.selectionForCompositeField "orders" [] object_ (identity >> Decode.list)
+
+
+productCount : SelectionSet Int Cambiatus.Object.Community
+productCount =
+    Object.selectionForField "Int" "productCount" [] Decode.int
+
+
+subdomain :
+    SelectionSet decodesTo Cambiatus.Object.Subdomain
+    -> SelectionSet (Maybe decodesTo) Cambiatus.Object.Community
+subdomain object_ =
+    Object.selectionForCompositeField "subdomain" [] object_ (identity >> Decode.nullable)
 
 
 supply : SelectionSet (Maybe Float) Cambiatus.Object.Community
@@ -114,6 +174,11 @@ symbol =
     Object.selectionForField "String" "symbol" [] Decode.string
 
 
+transferCount : SelectionSet Int Cambiatus.Object.Community
+transferCount =
+    Object.selectionForField "Int" "transferCount" [] Decode.int
+
+
 type alias TransfersOptionalArguments =
     { after : OptionalArgument String
     , before : OptionalArgument String
@@ -122,7 +187,10 @@ type alias TransfersOptionalArguments =
     }
 
 
-transfers : (TransfersOptionalArguments -> TransfersOptionalArguments) -> SelectionSet decodesTo Cambiatus.Object.TransferConnection -> SelectionSet (Maybe decodesTo) Cambiatus.Object.Community
+transfers :
+    (TransfersOptionalArguments -> TransfersOptionalArguments)
+    -> SelectionSet decodesTo Cambiatus.Object.TransferConnection
+    -> SelectionSet (Maybe decodesTo) Cambiatus.Object.Community
 transfers fillInOptionals object_ =
     let
         filledInOptionals =
@@ -138,3 +206,24 @@ transfers fillInOptionals object_ =
 type_ : SelectionSet (Maybe String) Cambiatus.Object.Community
 type_ =
     Object.selectionForField "(Maybe String)" "type" [] (Decode.string |> Decode.nullable)
+
+
+uploads :
+    SelectionSet decodesTo Cambiatus.Object.Upload
+    -> SelectionSet (List decodesTo) Cambiatus.Object.Community
+uploads object_ =
+    Object.selectionForCompositeField "uploads" [] object_ (identity >> Decode.list)
+
+
+{-| List of users that are claim validators
+-}
+validators :
+    SelectionSet decodesTo Cambiatus.Object.User
+    -> SelectionSet (List decodesTo) Cambiatus.Object.Community
+validators object_ =
+    Object.selectionForCompositeField "validators" [] object_ (identity >> Decode.list)
+
+
+website : SelectionSet (Maybe String) Cambiatus.Object.Community
+website =
+    Object.selectionForField "(Maybe String)" "website" [] (Decode.string |> Decode.nullable)

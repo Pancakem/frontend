@@ -9,24 +9,68 @@ type Action
     = Action
 
 
+type Address
+    = Address
+
+
 type Check
     = Check
+
+
+type City
+    = City
 
 
 type Claim
     = Claim
 
 
+type ClaimConnection
+    = ClaimConnection
+
+
+type ClaimEdge
+    = ClaimEdge
+
+
 type Community
     = Community
+
+
+type CommunityPreview
+    = CommunityPreview
+
+
+type Contact
+    = Contact
+
+
+type Country
+    = Country
+
+
+type DeleteKycAddress
+    = DeleteKycAddress
+
+
+type Exists
+    = Exists
 
 
 type Invite
     = Invite
 
 
+type KycData
+    = KycData
+
+
 type Mint
     = Mint
+
+
+type Neighborhood
+    = Neighborhood
 
 
 type Network
@@ -41,24 +85,36 @@ type Objective
     = Objective
 
 
+type Order
+    = Order
+
+
 type PageInfo
     = PageInfo
 
 
-type Profile
-    = Profile
+type Product
+    = Product
 
 
 type PushSubscription
     = PushSubscription
 
 
-type Sale
-    = Sale
+type SearchResult
+    = SearchResult
 
 
-type SaleHistory
-    = SaleHistory
+type Session
+    = Session
+
+
+type State
+    = State
+
+
+type Subdomain
+    = Subdomain
 
 
 type Transfer
@@ -75,3 +131,11 @@ type TransferEdge
 
 type UnreadNotifications
     = UnreadNotifications
+
+
+type Upload
+    = Upload
+
+
+type User
+    = User

@@ -1,34 +1,37 @@
-module Eos exposing (Action, Asset, Authorization, EosBool(..), Network, Symbol, TableQuery, Transaction, bespiralSymbol, boolToEosBool, decodeAmountToFloat, decodeAsset, encodeAction, encodeAsset, encodeAuthorization, encodeEosBool, encodeNetwork, encodeSymbol, encodeTableQuery, encodeTransaction, symbolDecoder, symbolFromString, symbolSelectionSet, symbolToString, symbolUrlParser)
+module Eos exposing
+    ( Action
+    , Asset
+    , Authorization
+    , EosBool(..)
+    , Symbol
+    , TableQuery
+    , Transaction
+    , assetToString
+    , boolToEosBool
+    , cambiatusSymbol
+    , decodeAsset
+    , encodeAsset
+    , encodeEosBool
+    , encodeSymbol
+    , encodeTableQuery
+    , encodeTransaction
+    , eosBoolDecoder
+    , eosBoolToBool
+    , formatSymbolAmount
+    , getSymbolPrecision
+    , maxSymbolLength
+    , minSymbolLength
+    , symbolDecoder
+    , symbolFromString
+    , symbolSelectionSet
+    , symbolToString
+    , symbolToSymbolCodeString
+    )
 
-import Eos.Account as Account exposing (Account, PermissionName)
+import Eos.Account as Account exposing (PermissionName)
 import Graphql.SelectionSet as SelectionSet exposing (SelectionSet, with)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
-import Url.Parser
-
-
-
--- NETWORK
-
-
-type alias Network =
-    { blockchain : String
-    , host : String
-    , port_ : Int
-    , protocol : String
-    , chainId : String
-    }
-
-
-encodeNetwork : Network -> Value
-encodeNetwork network =
-    Encode.object
-        [ ( "blockchain", Encode.string network.blockchain )
-        , ( "host", Encode.string network.host )
-        , ( "port", Encode.int network.port_ )
-        , ( "protocol", Encode.string network.protocol )
-        , ( "chainId", Encode.string network.chainId )
-        ]
 
 
 
@@ -36,19 +39,14 @@ encodeNetwork network =
 
 
 type alias Transaction =
-    { actions : List Action
-    }
-
-
-
--- TODO: you'll receive one authorization for all the actions, just encode each action with the same authorization
+    List Action
 
 
 encodeTransaction : Transaction -> Value
 encodeTransaction transaction =
     Encode.object
         [ ( "name", Encode.string "eosTransaction" )
-        , ( "actions", Encode.list encodeAction transaction.actions )
+        , ( "actions", Encode.list encodeAction transaction )
         ]
 
 
@@ -106,11 +104,38 @@ type alias Asset =
     }
 
 
+assetToString : Asset -> String
+assetToString ({ symbol } as asset) =
+    let
+        amountString =
+            String.fromFloat asset.amount
+
+        value =
+            case String.split "." amountString of
+                [ _, _ ] ->
+                    amountString
+
+                [ _ ] ->
+                    case getSymbolPrecision symbol of
+                        0 ->
+                            amountString
+
+                        p ->
+                            amountString
+                                ++ "."
+                                ++ (List.repeat p "0" |> String.concat)
+
+                _ ->
+                    ""
+    in
+    value
+        ++ " "
+        ++ symbolToSymbolCodeString asset.symbol
+
+
 encodeAsset : Asset -> Value
 encodeAsset asset =
-    String.fromFloat asset.amount
-        ++ " "
-        ++ symbolToString asset.symbol
+    assetToString asset
         |> Encode.string
 
 
@@ -121,12 +146,12 @@ decodeAsset =
             (\s ->
                 let
                     value =
-                        amountToFloat s
+                        assetStringToFloat s
                             |> Maybe.map Decode.succeed
                             |> Maybe.withDefault (Decode.fail "Fail to decode asset amount")
 
                     symbol =
-                        amountToSymbol s
+                        getSymbolFromAssetString s
                             |> Maybe.map Decode.succeed
                             |> Maybe.withDefault (Decode.fail "Fail to decode asset symbol")
                 in
@@ -137,81 +162,201 @@ decodeAsset =
             )
 
 
-decodeAmountToFloat : Decoder Float
-decodeAmountToFloat =
-    Decode.string
-        |> Decode.andThen
-            (\s ->
-                amountToFloat s
-                    |> Maybe.map Decode.succeed
-                    |> Maybe.withDefault (Decode.fail "Fail to decode amount")
-            )
-
-
-amountToFloat : String -> Maybe Float
-amountToFloat s =
+assetStringToFloat : String -> Maybe Float
+assetStringToFloat s =
     String.split " " s
         |> List.head
         |> Maybe.andThen String.toFloat
+
+
+getSymbolFromAssetString : String -> Maybe Symbol
+getSymbolFromAssetString s =
+    let
+        assetArr =
+            String.split " " s
+
+        symbol : Maybe String
+        symbol =
+            assetArr |> List.reverse |> List.head
+
+        precision : Maybe Int
+        precision =
+            assetArr
+                |> List.head
+                |> Maybe.andThen (\amount -> Just (String.split "." amount))
+                |> Maybe.andThen
+                    (\amountArr ->
+                        case amountArr of
+                            [ _, p ] ->
+                                Just (String.length p)
+
+                            _ ->
+                                Just 0
+                    )
+    in
+    case ( symbol, precision ) of
+        ( Just symbolString, Just p ) ->
+            Just (Symbol symbolString p)
+
+        _ ->
+            Nothing
 
 
 
 -- SYMBOL
 
 
+{-| Symbol is composed of a 3 to 4 alphanumeric chars long and an integer, used for informing precision
+On EOS symbols are displayed like so: `4,EOS` or `0,CMB`
+
+
+# Definition
+
+@docs Symbol
+
+-}
 type Symbol
-    = Symbol String
+    = Symbol String Int
+
+
+getSymbolPrecision : Symbol -> Int
+getSymbolPrecision (Symbol _ precision) =
+    precision
 
 
 symbolDecoder : Decoder Symbol
 symbolDecoder =
-    Decode.map Symbol Decode.string
+    Decode.string
+        |> Decode.andThen
+            (\string ->
+                if string == "undefined" then
+                    Decode.fail "Cannot decode 'undefined' symbol, check Javascript"
+
+                else
+                    case symbolFromString string of
+                        Just symbol ->
+                            Decode.succeed symbol
+
+                        Nothing ->
+                            Decode.fail "Cannot decode given symbol"
+            )
 
 
 encodeSymbol : Symbol -> Value
-encodeSymbol (Symbol symbol) =
-    Encode.string symbol
+encodeSymbol symbol =
+    Encode.string (symbolToString symbol)
 
 
 symbolToString : Symbol -> String
-symbolToString (Symbol symbol) =
-    symbol
+symbolToString (Symbol symbol precision) =
+    [ String.fromInt precision, ",", symbol ]
+        |> String.concat
+
+
+formatSymbolAmount : Symbol -> Float -> String
+formatSymbolAmount (Symbol _ precision) amount =
+    let
+        separator =
+            "."
+    in
+    case String.fromFloat amount |> String.split separator of
+        [] ->
+            -- Impossible
+            String.fromFloat amount
+
+        [ withoutSeparator ] ->
+            if precision == 0 then
+                withoutSeparator
+
+            else
+                withoutSeparator ++ separator ++ String.repeat precision "0"
+
+        beforeSeparator :: afterSeparator :: _ ->
+            beforeSeparator
+                ++ separator
+                ++ (afterSeparator
+                        ++ String.repeat (precision - String.length afterSeparator) "0"
+                        |> String.left precision
+                   )
+
+
+symbolToSymbolCodeString : Symbol -> String
+symbolToSymbolCodeString (Symbol s _) =
+    s
+
+
+minSymbolLength : Int
+minSymbolLength =
+    3
+
+
+maxSymbolLength : Int
+maxSymbolLength =
+    7
 
 
 symbolFromString : String -> Maybe Symbol
 symbolFromString str =
-    if String.length str == 3 || String.length str == 4 then
-        Just (Symbol (String.toUpper str))
+    let
+        details =
+            String.split "," str |> List.take 2
 
-    else
-        Nothing
+        maybePrecision : Maybe Int
+        maybePrecision =
+            List.head details
+                |> Maybe.andThen String.toInt
 
+        maybeSymbolCode : Maybe String
+        maybeSymbolCode =
+            details |> List.reverse |> List.head
+    in
+    case ( maybeSymbolCode, maybePrecision ) of
+        ( Just symbolCode, Just precision ) ->
+            if
+                String.all Char.isAlpha symbolCode
+                    && (String.length symbolCode >= minSymbolLength || String.length symbolCode <= maxSymbolLength)
+            then
+                Just (Symbol (String.toUpper symbolCode) precision)
 
-symbolUrlParser : Url.Parser.Parser (Symbol -> a) a
-symbolUrlParser =
-    Url.Parser.custom "SYMBOL" symbolFromString
+            else
+                Nothing
+
+        _ ->
+            Nothing
 
 
 symbolSelectionSet : SelectionSet String typeLock -> SelectionSet Symbol typeLock
-symbolSelectionSet =
-    SelectionSet.map Symbol
+symbolSelectionSet field =
+    SelectionSet.succeed Symbol
+        |> with
+            (field
+                |> SelectionSet.mapOrFail
+                    (\s ->
+                        case String.split "," s |> List.reverse |> List.head of
+                            Just e ->
+                                Ok e
+
+                            Nothing ->
+                                Err "Can't parse symbol"
+                    )
+            )
+        |> with
+            (field
+                |> SelectionSet.mapOrFail
+                    (\s ->
+                        case String.split "," s |> List.head |> Maybe.andThen String.toInt of
+                            Just e ->
+                                Ok e
+
+                            Nothing ->
+                                Err "Can't parse symbol"
+                    )
+            )
 
 
-bespiralSymbol : Symbol
-bespiralSymbol =
-    Symbol "BES"
-
-
-amountToSymbol : String -> Maybe Symbol
-amountToSymbol s =
-    String.split " " s
-        |> List.reverse
-        |> List.head
-        |> Maybe.andThen symbolFromString
-
-
-
--- EosBool
+cambiatusSymbol : Symbol
+cambiatusSymbol =
+    Symbol "CMB" 0
 
 
 type EosBool
@@ -228,6 +373,16 @@ boolToEosBool b =
         EosFalse
 
 
+eosBoolToBool : EosBool -> Bool
+eosBoolToBool eosBool =
+    case eosBool of
+        EosTrue ->
+            True
+
+        EosFalse ->
+            False
+
+
 encodeEosBool : EosBool -> Value
 encodeEosBool eosBool =
     case eosBool of
@@ -236,6 +391,21 @@ encodeEosBool eosBool =
 
         EosFalse ->
             Encode.int 0
+
+
+intToEosBool : Int -> EosBool
+intToEosBool v =
+    if v == 1 then
+        EosTrue
+
+    else
+        EosFalse
+
+
+eosBoolDecoder : Decoder EosBool
+eosBoolDecoder =
+    Decode.int
+        |> Decode.map intToEosBool
 
 
 

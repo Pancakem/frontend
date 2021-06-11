@@ -20,9 +20,9 @@ import Json.Decode as Decode
 
 
 type alias Fragments decodesTo =
-    { onTransfer : SelectionSet decodesTo Cambiatus.Object.Transfer
-    , onSaleHistory : SelectionSet decodesTo Cambiatus.Object.SaleHistory
-    , onMint : SelectionSet decodesTo Cambiatus.Object.Mint
+    { onMint : SelectionSet decodesTo Cambiatus.Object.Mint
+    , onOrder : SelectionSet decodesTo Cambiatus.Object.Order
+    , onTransfer : SelectionSet decodesTo Cambiatus.Object.Transfer
     }
 
 
@@ -32,19 +32,19 @@ fragments :
     Fragments decodesTo
     -> SelectionSet decodesTo Cambiatus.Union.NotificationType
 fragments selections =
-    Object.exhuastiveFragmentSelection
-        [ Object.buildFragment "Transfer" selections.onTransfer
-        , Object.buildFragment "SaleHistory" selections.onSaleHistory
-        , Object.buildFragment "Mint" selections.onMint
+    Object.exhaustiveFragmentSelection
+        [ Object.buildFragment "Mint" selections.onMint
+        , Object.buildFragment "Order" selections.onOrder
+        , Object.buildFragment "Transfer" selections.onTransfer
         ]
 
 
-{-| Can be used to create a non-exhuastive set of fragments by using the record
+{-| Can be used to create a non-exhaustive set of fragments by using the record
 update syntax to add `SelectionSet`s for the types you want to handle.
 -}
 maybeFragments : Fragments (Maybe decodesTo)
 maybeFragments =
-    { onTransfer = Graphql.SelectionSet.empty |> Graphql.SelectionSet.map (\_ -> Nothing)
-    , onSaleHistory = Graphql.SelectionSet.empty |> Graphql.SelectionSet.map (\_ -> Nothing)
-    , onMint = Graphql.SelectionSet.empty |> Graphql.SelectionSet.map (\_ -> Nothing)
+    { onMint = Graphql.SelectionSet.empty |> Graphql.SelectionSet.map (\_ -> Nothing)
+    , onOrder = Graphql.SelectionSet.empty |> Graphql.SelectionSet.map (\_ -> Nothing)
+    , onTransfer = Graphql.SelectionSet.empty |> Graphql.SelectionSet.map (\_ -> Nothing)
     }

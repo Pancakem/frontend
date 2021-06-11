@@ -1,56 +1,56 @@
 module Shop exposing
     ( Filter(..)
-    , Sale
-    , SaleId
-    , decodeTargetValueToFilter
+    , Product
+    , ProductId
     , encodeTransferSale
-    , saleQuery
-    , salesQuery
+    , productQuery
+    , productsQuery
     )
 
 import Avatar exposing (Avatar)
 import Cambiatus.Object
-import Cambiatus.Object.Profile as Creator
-import Cambiatus.Object.Sale
-import Cambiatus.Object.SaleHistory
-import Cambiatus.Query
+import Cambiatus.Object.Product
+import Cambiatus.Object.User as User
+import Cambiatus.Query as Query
 import Eos exposing (Symbol)
 import Eos.Account as Eos
 import Graphql.Operation exposing (RootQuery)
 import Graphql.OptionalArgument exposing (OptionalArgument(..))
 import Graphql.SelectionSet as SelectionSet exposing (SelectionSet, with)
-import Html.Events exposing (targetValue)
-import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
-import Profile exposing (Profile)
+import Profile.Contact as Contact
 
 
 
 -- Sale
 
 
-type alias Sale =
+type alias Product =
     { id : Int
     , title : String
     , description : String
     , creatorId : Eos.Name
-    , createdEosAccount : Eos.Name
     , price : Float
     , symbol : Symbol
-    , rateCount : Maybe Int
     , image : Maybe String
     , units : Int
     , trackStock : Bool
-    , creator : Profile
+    , creator : ShopProfile
     }
 
 
-type alias SaleAvatar =
-    { avatar : Avatar }
-
-
-type alias SaleId =
+type alias ProductId =
     String
+
+
+type alias ShopProfile =
+    { account : Eos.Name
+    , name : Maybe String
+    , avatar : Avatar
+    , email : Maybe String
+    , bio : Maybe String
+    , contacts : List Contact.Normalized
+    }
 
 
 type Filter
@@ -82,77 +82,60 @@ encodeTransferSale t =
         ]
 
 
-decodeTargetValueToFilter : ( String, String ) -> Decoder Filter
-decodeTargetValueToFilter ( all, user ) =
-    let
-        transform val =
-            if val == all then
-                Decode.succeed All
 
-            else if val == user then
-                Decode.succeed UserSales
-
-            else
-                Decode.fail ("Invalid filter: " ++ val)
-    in
-    Decode.andThen transform targetValue
+-- PRODUCT GRAPHQL API
 
 
-
--- SALE GRAPHQL API
-
-
-salesSelection : SelectionSet Sale Cambiatus.Object.Sale
-salesSelection =
-    SelectionSet.succeed Sale
-        |> with Cambiatus.Object.Sale.id
-        |> with Cambiatus.Object.Sale.title
-        |> with Cambiatus.Object.Sale.description
-        |> with (Eos.nameSelectionSet Cambiatus.Object.Sale.creatorId)
-        |> with (Eos.nameSelectionSet Cambiatus.Object.Sale.createdEosAccount)
-        |> with Cambiatus.Object.Sale.price
-        |> with (Eos.symbolSelectionSet Cambiatus.Object.Sale.communityId)
-        |> SelectionSet.hardcoded (Just <| 0)
-        |> with Cambiatus.Object.Sale.image
-        |> with Cambiatus.Object.Sale.units
-        |> with Cambiatus.Object.Sale.trackStock
-        |> with (Cambiatus.Object.Sale.creator Profile.selectionSet)
+productSelection : SelectionSet Product Cambiatus.Object.Product
+productSelection =
+    SelectionSet.succeed Product
+        |> with Cambiatus.Object.Product.id
+        |> with Cambiatus.Object.Product.title
+        |> with Cambiatus.Object.Product.description
+        |> with (Eos.nameSelectionSet Cambiatus.Object.Product.creatorId)
+        |> with Cambiatus.Object.Product.price
+        |> with (Eos.symbolSelectionSet Cambiatus.Object.Product.communityId)
+        |> with Cambiatus.Object.Product.image
+        |> with Cambiatus.Object.Product.units
+        |> with Cambiatus.Object.Product.trackStock
+        |> with (Cambiatus.Object.Product.creator shopProfileSelectionSet)
 
 
-saleQuery : Int -> SelectionSet (Maybe Sale) RootQuery
-saleQuery saleId =
-    let
-        args =
-            { input = { id = saleId } }
-    in
-    Cambiatus.Query.sale
-        args
-        salesSelection
+shopProfileSelectionSet : SelectionSet ShopProfile Cambiatus.Object.User
+shopProfileSelectionSet =
+    SelectionSet.succeed ShopProfile
+        |> with (Eos.nameSelectionSet User.account)
+        |> with User.name
+        |> with (Avatar.selectionSet User.avatar)
+        |> with User.email
+        |> with User.bio
+        |> with
+            (User.contacts Contact.selectionSet
+                |> SelectionSet.map (List.filterMap identity)
+            )
 
 
-salesQuery : Filter -> Eos.Name -> SelectionSet (List Sale) RootQuery
-salesQuery filter accName =
+productQuery : Int -> SelectionSet (Maybe Product) RootQuery
+productQuery saleId =
+    Query.product { id = saleId } productSelection
+
+
+productsQuery : Filter -> Eos.Name -> Symbol -> SelectionSet (List Product) RootQuery
+productsQuery filter accName communityId =
     case filter of
         UserSales ->
             let
-                accString =
-                    Eos.nameToString accName
-
                 args =
-                    { input = { account = Present accString, all = Absent, communities = Absent } }
+                    \_ ->
+                        { filters = Present { account = Eos.nameToString accName, inStock = Absent }
+                        }
             in
-            Cambiatus.Query.sales
-                args
-                salesSelection
+            Query.products args { communityId = Eos.symbolToString communityId } productSelection
 
         All ->
             let
-                accString =
-                    Eos.nameToString accName
-
                 args =
-                    { input = { account = Absent, all = Present accString, communities = Absent } }
+                    { communityId = Eos.symbolToString communityId
+                    }
             in
-            Cambiatus.Query.sales
-                args
-                salesSelection
+            Query.products identity args productSelection

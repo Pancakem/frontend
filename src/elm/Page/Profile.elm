@@ -1,27 +1,38 @@
-module Page.Profile exposing (Model, Msg, init, jsAddressToMsg, msgToString, update, view)
+module Page.Profile exposing
+    ( Model
+    , Msg
+    , ProfilePage(..)
+    , init
+    , jsAddressToMsg
+    , msgToString
+    , update
+    , view
+    , viewUserInfo
+    )
 
-import Api
 import Api.Graphql
-import Asset.Icon as Icon
-import Avatar exposing (Avatar)
-import Dict exposing (Dict)
-import Eos as Eos exposing (Symbol)
+import Avatar
+import Browser.Dom as Dom
 import Eos.Account as Eos
-import File exposing (File)
 import Graphql.Http
-import Html exposing (..)
-import Html.Attributes exposing (..)
-import Html.Events exposing (..)
-import Http
-import I18Next exposing (t)
+import Html exposing (Html, a, br, button, div, label, li, p, span, text, ul)
+import Html.Attributes exposing (class, href, target)
+import Html.Events exposing (onClick)
+import Icons
 import Json.Decode as Decode exposing (Value)
 import Json.Encode as Encode
 import Page
-import Profile exposing (Profile, ProfileForm, decode)
-import PushSubscription exposing (PushSubscription)
+import Profile exposing (DeleteKycAndAddressResult)
+import Profile.Contact as Contact
+import RemoteData exposing (RemoteData)
+import Route
 import Session.LoggedIn as LoggedIn exposing (External(..))
+import Session.Shared exposing (Shared, Translators)
 import Task
 import UpdateResult as UR
+import View.Feedback as Feedback
+import View.Modal as Modal
+import View.Pin as Pin
 
 
 
@@ -29,18 +40,9 @@ import UpdateResult as UR
 
 
 init : LoggedIn.Model -> ( Model, Cmd Msg )
-init loggedIn =
-    let
-        profileQuery =
-            Api.Graphql.query loggedIn.shared
-                (Profile.query loggedIn.accountName)
-                CompletedProfileLoad
-    in
-    ( initModel loggedIn
-    , Cmd.batch
-        [ profileQuery
-        , Task.succeed CheckPushPref |> Task.perform identity
-        ]
+init _ =
+    ( initModel
+    , Task.succeed CheckPushPref |> Task.perform identity
     )
 
 
@@ -49,490 +51,553 @@ init loggedIn =
 
 
 type alias Model =
-    { status : Status
-    , privateKeyModal : Maybe String
-    , pushNotifications : Bool
+    { currentPin : Maybe String
+    , isNewPinModalVisible : Bool
+    , isPushNotificationsEnabled : Bool
+    , maybePdfDownloadedSuccessfully : Maybe Bool
+    , isDeleteKycModalShowed : Bool
+    , pinInputModel : Pin.Model
     }
 
 
-initModel : LoggedIn.Model -> Model
-initModel _ =
-    { status = Loading
-    , privateKeyModal = Nothing
-    , pushNotifications = False
+initModel : Model
+initModel =
+    { currentPin = Nothing
+    , isNewPinModalVisible = False
+    , isPushNotificationsEnabled = False
+    , maybePdfDownloadedSuccessfully = Nothing
+    , isDeleteKycModalShowed = False
+    , pinInputModel =
+        Pin.init
+            { label = "profile.newPin"
+            , id = "new-pin-input"
+            , withConfirmation = False
+            , submitLabel = "profile.pin.button"
+            , submittingLabel = "profile.pin.button"
+            }
     }
-
-
-type Status
-    = Loading
-    | LoadingFailed (Graphql.Http.Error (Maybe Profile))
-    | Loaded Profile
-    | Editing Profile AvatarStatus ProfileForm
-    | Saving Profile AvatarStatus ProfileForm
-
-
-type AvatarStatus
-    = NotAsked
-    | Sending File Int
-    | SendingFailed File Http.Error
 
 
 
 -- VIEW
 
 
-view : LoggedIn.Model -> Model -> Html Msg
-view loggedIn model =
-    case model.status of
-        Loading ->
-            Page.fullPageLoading
-
-        LoadingFailed e ->
-            Page.fullPageError (t loggedIn.shared.translations "profile.title") Http.Timeout
-
-        Loaded profile ->
-            view_ loggedIn profile model
-
-        Editing profile avatarS form ->
-            viewForm loggedIn False profile avatarS form
-
-        Saving profile avatarS form ->
-            viewForm loggedIn True profile avatarS form
-
-
-view_ : LoggedIn.Model -> Profile -> Model -> Html Msg
-view_ loggedIn profile model =
+view : LoggedIn.Model -> Model -> { title : String, content : Html Msg }
+view ({ shared } as loggedIn) model =
     let
-        ipfsUrl =
-            loggedIn.shared.endpoints.ipfs
+        title =
+            case loggedIn.profile of
+                RemoteData.Success profile ->
+                    Maybe.withDefault "" profile.name
 
-        text_ str =
-            text (t loggedIn.shared.translations str)
+                _ ->
+                    ""
 
-        notification_prompt =
-            if model.pushNotifications then
-                "Disable Push Notifications"
+        content =
+            case loggedIn.profile of
+                RemoteData.Loading ->
+                    Page.fullPageLoading shared
 
-            else
-                "profile.edit.push_notifications"
+                RemoteData.NotAsked ->
+                    Page.fullPageLoading shared
+
+                RemoteData.Failure e ->
+                    Page.fullPageGraphQLError (shared.translators.t "profile.title") e
+
+                RemoteData.Success profile ->
+                    div [ class "flex-grow flex flex-col" ]
+                        [ Page.viewHeader loggedIn (shared.translators.t "menu.profile")
+                        , viewUserInfo loggedIn
+                            profile
+                            Private
+                            (viewSettings loggedIn model profile)
+                        , viewNewPinModal model shared
+                        , viewDownloadPdfErrorModal model loggedIn
+                        , viewDeleteKycModal shared.translators model
+                        ]
     in
-    div [ class "container mx-auto px-4" ]
-        [ Page.viewTitle (t loggedIn.shared.translations "profile.title")
-        , div [ class "card profile-card" ]
-            [ div [ class "profile-info" ]
-                [ div [ class "profile-img" ]
-                    [ Avatar.view ipfsUrl profile.avatar "profile-img-avatar" ]
-                , div [ class "profile-info-container" ]
-                    [ div [ class "profile-info-meta" ]
-                        [ h3 [ class "profile-name" ]
-                            [ text (Profile.username profile) ]
-                        , span [ class "profile-email" ]
-                            [ text (Maybe.withDefault "" profile.email) ]
-                        , br [] []
-                        , br [] []
-                        , span [ class "profile-email" ]
-                            [ text (Eos.nameToString profile.account) ]
-                        ]
-                    , p [ class "profile-description" ]
-                        [ case profile.bio of
-                            Just bio ->
-                                text bio
+    { title = title
+    , content = content
+    }
 
-                            Nothing ->
-                                span [ class "text-gray" ] [ text_ "profile.edit.placeholders.bio" ]
-                        ]
-                    ]
-                ]
-            , div [ class "profile-location-interest" ]
-                [ div [ class "profile-location" ]
-                    [ h4 [ class "profile-title" ]
-                        [ Icon.location ""
-                        , span [] [ text_ "profile.edit.labels.localization" ]
-                        ]
-                    , case profile.localization of
-                        Just location ->
-                            p [] [ text location ]
 
-                        Nothing ->
-                            p [ class "text-gray" ]
-                                [ text_ "profile.edit.placeholders.localization" ]
-                    ]
-                , div [ class "profile-interests" ]
-                    [ h4 [ class "profile-title" ]
-                        [ Icon.star ""
-                        , span [] [ text_ "profile.edit.labels.interests" ]
-                        ]
-                    , if List.isEmpty profile.interests then
-                        p [ class "text-gray" ]
-                            [ text_ "profile.edit.placeholders.interests" ]
+viewDeleteKycModal : Translators -> Model -> Html Msg
+viewDeleteKycModal { t } model =
+    Modal.initWith
+        { closeMsg = ToggleDeleteKycModal
+        , isVisible = model.isDeleteKycModalShowed
+        }
+        |> Modal.withHeader (t "community.kyc.delete.confirmationHeader")
+        |> Modal.withBody
+            [ div []
+                [ text (t "community.kyc.delete.confirmationBody")
+                ]
+            ]
+        |> Modal.withFooter
+            [ button
+                [ class "modal-cancel"
+                , onClick ToggleDeleteKycModal
+                ]
+                [ text (t "community.kyc.delete.cancel") ]
+            , button
+                [ class "modal-accept"
+                , onClick DeleteKycAccepted
+                ]
+                [ text (t "community.kyc.delete.confirm") ]
+            ]
+        |> Modal.toHtml
 
-                      else
-                        div [ class "tags" ]
-                            (List.map
-                                (\i ->
-                                    span []
-                                        [ text i ]
-                                )
-                                profile.interests
-                            )
-                    ]
-                ]
-            , viewBadges loggedIn model
-            , div [ class "notification-settings-card", onClick RequestPush ]
-                [ button [ class "btn btn--primary" ]
-                    [ text_ notification_prompt ]
-                ]
-            , case LoggedIn.maybePrivateKey loggedIn of
+
+viewSettings : LoggedIn.Model -> Model -> Profile.Model -> Html Msg
+viewSettings loggedIn model profile =
+    let
+        { t } =
+            loggedIn.shared.translators
+
+        downloadAction =
+            case LoggedIn.maybePrivateKey loggedIn of
+                Just _ ->
+                    let
+                        currentPin =
+                            case model.currentPin of
+                                -- The case when "Download" PDF button pressed just after changing the PIN
+                                Just pin ->
+                                    pin
+
+                                Nothing ->
+                                    loggedIn.auth.pinModel.pin
+                    in
+                    DownloadPdf currentPin
+
                 Nothing ->
                     case loggedIn.shared.maybeAccount of
                         Just ( _, True ) ->
-                            button
-                                [ classList
-                                    [ ( "key-button", True )
-                                    , ( "circle-background", True )
-                                    , ( "circle-background--primary", True )
-                                    ]
-                                , onClick ClickedViewPrivateKeyAuth
-                                , type_ "button"
-                                , title (t loggedIn.shared.translations "profile.actions.viewPrivatekey")
-                                ]
-                                [ Icon.key "" ]
+                            ClickedViewPrivateKeyAuth
 
                         _ ->
-                            text ""
+                            Ignored
 
-                Just privateKey ->
-                    div []
-                        [ button
-                            [ classList
-                                [ ( "key-button", True )
-                                , ( "circle-background", True )
-                                , ( "circle-background--primary", True )
+        viewKycSettings =
+            let
+                kycLabel =
+                    span [ class "flex items-center" ]
+                        [ text (t "community.kyc.dataTitle")
+                        , span [ class "icon-tooltip ml-1" ]
+                            [ Icons.question "inline-block"
+                            , p
+                                [ class "icon-tooltip-content" ]
+                                [ text (t "community.kyc.info")
                                 ]
-                            , onClick (ClickedViewPrivateKey privateKey)
-                            , type_ "button"
-                            , title (t loggedIn.shared.translations "profile.actions.viewPrivatekey")
                             ]
-                            [ Icon.key "" ]
-                        , button
-                            [ classList
-                                [ ( "key-button", True )
-                                , ( "circle-background", True )
-                                , ( "circle-background--primary", True )
-                                ]
-                            , onClick DownloadPdf
-                            , type_ "button"
-                            , title (t loggedIn.shared.translations "profile.actions.viewPrivatekey")
-                            ]
-                            [ Icon.key "" ]
                         ]
-            , button
-                [ classList
-                    [ ( "edit-button", True )
-                    , ( "circle-background", True )
-                    , ( "circle-background--primary", True )
-                    ]
-                , onClick ClickedEdit
-                , type_ "button"
-                , title (t loggedIn.shared.translations "profile.actions.edit")
-                ]
-                [ Icon.edit "" ]
+            in
+            case profile.kyc of
+                Just _ ->
+                    viewProfileItem
+                        kycLabel
+                        (viewDangerButton (t "community.kyc.delete.label") ToggleDeleteKycModal)
+                        Center
+                        (Just
+                            (div [ class "uppercase text-red pt-2 text-xs" ]
+                                [ text (t "community.kyc.delete.warning")
+                                ]
+                            )
+                        )
+
+                Nothing ->
+                    viewProfileItem
+                        kycLabel
+                        (viewButton (t "menu.add") AddKycClicked)
+                        Center
+                        Nothing
+    in
+    div [ class "bg-white mb-6 w-full md:bg-gray-100" ]
+        [ ul [ class "w-full divide-y divide-gray-500" ]
+            [ viewProfileItem
+                (text (t "profile.12words.title"))
+                (viewButton (t "profile.12words.button") downloadAction)
+                Center
+                Nothing
+            , viewProfileItem
+                (text (t "profile.pin.title"))
+                (viewButton (t "profile.pin.button") ClickedChangePin)
+                Center
+                Nothing
+
+            -- , viewProfileItem (text (t "notifications.title")) (viewTogglePush loggedIn model) Center Nothing
+            , viewKycSettings
             ]
-        , case model.privateKeyModal of
+        ]
+
+
+type ProfilePage
+    = Private
+    | Public
+
+
+viewUserInfo : LoggedIn.Model -> Profile.Model -> ProfilePage -> Html msg -> Html msg
+viewUserInfo loggedIn profile pageType privateView =
+    let
+        ({ t } as translators) =
+            loggedIn.shared.translators
+
+        userName =
+            Maybe.withDefault "" profile.name
+
+        email =
+            Maybe.withDefault "" profile.email
+
+        bio =
+            Maybe.withDefault "" profile.bio
+
+        location =
+            Maybe.withDefault "" profile.localization
+
+        account =
+            Eos.nameToString profile.account
+
+        viewAddress =
+            case profile.address of
+                Just addr ->
+                    let
+                        fullAddress =
+                            span []
+                                [ text <|
+                                    addr.country
+                                        ++ ", "
+                                        ++ addr.state
+                                        ++ ", "
+                                        ++ addr.city
+                                        ++ ", "
+                                        ++ addr.neighborhood
+                                        ++ ", "
+                                        ++ addr.street
+                                        ++ (if addr.number /= "" then
+                                                ", " ++ addr.number
+
+                                            else
+                                                ""
+                                           )
+                                , br [] []
+                                , text addr.zip
+                                ]
+                    in
+                    viewProfileItem
+                        (text (t "Address"))
+                        fullAddress
+                        Top
+                        Nothing
+
+                Nothing ->
+                    text ""
+
+        viewKyc =
+            case profile.kyc of
+                Just kyc ->
+                    let
+                        documentLabel =
+                            case kyc.documentType of
+                                "cedula_de_identidad" ->
+                                    "Cédula de identidad"
+
+                                "dimex" ->
+                                    "DIMEX"
+
+                                "nite" ->
+                                    "NITE"
+
+                                "gran_empresa" ->
+                                    "Gran Empresa"
+
+                                "mipyme" ->
+                                    "MIPYME"
+
+                                _ ->
+                                    "Unknown Document"
+                    in
+                    viewProfileItem
+                        (text documentLabel)
+                        (text kyc.document)
+                        Center
+                        Nothing
+
+                Nothing ->
+                    text ""
+
+        viewContact =
+            case pageType of
+                Private ->
+                    viewProfileItem (text (t "contact_form.options"))
+                        (a
+                            [ class "button-secondary button-sm uppercase cursor-pointer"
+                            , Route.href Route.ProfileAddContact
+                            ]
+                            [ text
+                                (if List.isEmpty profile.contacts then
+                                    t "menu.add"
+
+                                 else
+                                    t "menu.edit"
+                                )
+                            ]
+                        )
+                        Center
+                        Nothing
+
+                Public ->
+                    profile.contacts
+                        |> List.map (viewContactButton translators)
+                        |> div [ class "flex flex-col space-y-4 mt-4 mb-2" ]
+
+        leftSide =
+            div
+                [ class "p-4 bg-white border-white border-r md:border-gray-500 flex md:w-1/2" ]
+                [ div
+                    [ class "w-full container mx-auto md:max-w-lg self-center" ]
+                    [ div
+                        [ class "pb-4 w-full" ]
+                        [ div [ class "flex mb-4 items-center flex-wrap justify-center" ]
+                            [ Avatar.view profile.avatar "w-20 h-20 mr-6 xs-max:w-16 xs-max:h-16 xs-max:mr-3"
+                            , div [ class "flex-grow flex items-center justify-between" ]
+                                [ ul [ class "text-sm text-gray-900" ]
+                                    [ li [ class "font-medium text-body-black text-2xl xs-max:text-xl" ]
+                                        [ text userName ]
+                                    , li [] [ a [ href <| "mailto:" ++ email ] [ text email ] ]
+                                    , li [] [ text account ]
+                                    ]
+                                , case pageType of
+                                    Private ->
+                                        a
+                                            [ class "ml-2"
+                                            , Route.href Route.ProfileEditor
+                                            ]
+                                            [ Icons.edit "" ]
+
+                                    Public ->
+                                        text ""
+                                ]
+                            ]
+                        , p [ class "text-sm text-gray-900" ]
+                            [ text bio ]
+                        ]
+                    , case pageType of
+                        Public ->
+                            viewTransferButton
+                                loggedIn.shared
+                                account
+
+                        Private ->
+                            text ""
+                    , case pageType of
+                        Public ->
+                            viewContact
+
+                        Private ->
+                            text ""
+                    ]
+                ]
+
+        rightSide =
+            div [ class "w-full bg-gray-100 md:w-1/2" ]
+                [ div [ class "w-full bg-white md:bg-gray-100" ]
+                    [ div [ class "px-4" ]
+                        [ ul [ class "container mx-auto divide-y divide-gray-500 w-full mb-4 bg-white md:bg-gray-100" ]
+                            [ viewProfileItem
+                                (text (t "profile.locations"))
+                                (text location)
+                                Center
+                                Nothing
+                            , viewAddress
+                            , viewProfileItem
+                                (text (t "profile.interests"))
+                                (text (String.join ", " profile.interests))
+                                Top
+                                Nothing
+                            , case pageType of
+                                Public ->
+                                    text ""
+
+                                Private ->
+                                    viewContact
+                            , case pageType of
+                                Private ->
+                                    viewKyc
+
+                                Public ->
+                                    text ""
+                            ]
+                        ]
+                    ]
+                , div [ class "bg-white w-full md:bg-gray-100" ]
+                    [ div [ class "px-4" ]
+                        [ div [ class "container mx-auto" ]
+                            [ privateView
+                            ]
+                        ]
+                    ]
+                ]
+    in
+    div [ class "flex-grow flex bg-gray-100 relative" ]
+        [ div [ class "z-10 flex flex-col w-full md:container md:mx-auto md:flex-row bg-grey-100" ]
+            [ leftSide
+            , rightSide
+            ]
+        , div [ class "z-0 absolute w-full md:w-1/2 h-full max-h-100 md:bg-white" ] []
+        ]
+
+
+type VerticalAlign
+    = Top
+    | Center
+
+
+viewProfileItem : Html msg -> Html msg -> VerticalAlign -> Maybe (Html msg) -> Html msg
+viewProfileItem lbl content vAlign extraContent =
+    let
+        vAlignClass =
+            case vAlign of
+                Top ->
+                    "items-start"
+
+                Center ->
+                    "items-center"
+    in
+    li
+        [ class "py-4" ]
+        [ div
+            [ class "flex justify-between"
+            , class vAlignClass
+            ]
+            [ span [ class "text-sm leading-6 mr-4" ]
+                [ lbl ]
+            , span [ class "text-indigo-500 font-medium text-sm text-right" ]
+                [ content ]
+            ]
+        , case extraContent of
+            Just extra ->
+                extra
+
             Nothing ->
                 text ""
-
-            Just pk ->
-                div
-                    [ onClick ClickedClosePrivateKey
-                    ]
-                    [ div
-                        [ class "card card--modal"
-                        , stopPropagationOn "click"
-                            (Decode.succeed ( Ignored, True ))
-                        , style "position" "relative"
-                        , style "align-items" "stretch"
-                        ]
-                        [ h2 [ class "card__title" ]
-                            [ text_ "profile.edit.labels.privateKey" ]
-                        , br [] []
-                        , p [] [ text_ "profile.edit.placeholders.privateKey" ]
-                        , br [] []
-                        , p [] [ text pk ]
-                        , button
-                            [ class "card__close-btn"
-                            , onClick ClickedClosePrivateKey
-                            , type_ "button"
-                            ]
-                            [ Icon.close "" ]
-                        ]
-                    ]
         ]
 
 
-viewForm : LoggedIn.Model -> Bool -> Profile -> AvatarStatus -> ProfileForm -> Html Msg
-viewForm loggedIn isDisabled profile avatarS form =
-    let
-        ipfsUrl =
-            loggedIn.shared.endpoints.ipfs
-
-        text_ s =
-            text (t loggedIn.shared.translations s)
-
-        textr_ s m =
-            text (I18Next.tr loggedIn.shared.translations I18Next.Curly s m)
-
-        plcH s =
-            placeholder (t loggedIn.shared.translations s)
-    in
-    Html.form
-        [ onSubmit ClickedSave
-        ]
-        [ Page.viewTitle (t loggedIn.shared.translations "profile.title")
-        , div
-            [ class "card profile-card" ]
-            [ div [ class "profile-info" ]
-                [ viewAvatar ipfsUrl profile (t loggedIn.shared.translations "profile.edit.labels.avatar") avatarS
-                , div [ class "profile-info-container" ]
-                    [ div [ class "profile-info-meta" ]
-                        [ h3 [ class "profile-name" ]
-                            [ formField
-                                [ input
-                                    [ type_ "text"
-                                    , class "input profile-input-name"
-                                    , onInput EnteredName
-                                    , value form.name
-                                    , disabled isDisabled
-                                    , plcH "profile.edit.placeholders.name"
-                                    , maxlength 255
-                                    ]
-                                    []
-                                , viewFieldError "name" form.errors
-                                ]
-                            ]
-                        , span [ class "profile-email" ]
-                            [ formField
-                                [ input
-                                    [ type_ "email"
-                                    , class "input"
-                                    , onInput EnteredEmail
-                                    , value form.email
-                                    , disabled isDisabled
-                                    , plcH "profile.edit.placeholders.email"
-                                    ]
-                                    []
-                                , viewFieldError "email" form.errors
-                                ]
-                            ]
-                        ]
-                    , p [ class "profile-description" ]
-                        [ formField
-                            [ textarea
-                                [ class "input"
-                                , onInput EnteredBio
-                                , value form.bio
-                                , disabled isDisabled
-                                , plcH "profile.edit.placeholders.bio"
-                                , maxlength 255
-                                ]
-                                []
-                            , viewFieldError "bio" form.errors
-                            ]
-                        , div [ class "input-counter" ]
-                            [ textr_ "edit.input_counter"
-                                [ ( "current"
-                                  , ( String.fromInt (String.length form.bio) )
-                                  )
-                                , ( "max", "255" )
-                                ]
-                            ]
-                        ]
-                    ]
-                ]
-            , div [ class "profile-location-interest" ]
-                [ div [ class "profile-location" ]
-                    [ h4 [ class "profile-title" ]
-                        [ Icon.location ""
-                        , span [] [ text_ "profile.edit.labels.localization" ]
-                        ]
-                    , formField
-                        [ input
-                            [ type_ "text"
-                            , class "input"
-                            , onInput EnteredLocalization
-                            , value form.localization
-                            , disabled isDisabled
-                            , plcH "profile.edit.placeholders.localization"
-                            , maxlength 255
-                            ]
-                            []
-                        , viewFieldError "localization" form.errors
-                        ]
-                    ]
-                , div [ class "profile-interests" ]
-                    [ h4 [ class "profile-title" ]
-                        [ Icon.star ""
-                        , span [] [ text_ "profile.edit.labels.interests" ]
-                        ]
-                    , formField
-                        [ Html.form
-                            [ onSubmit ClickedAddInterest
-                            , class "input-group"
-                            ]
-                            [ input
-                                [ type_ "text"
-                                , class "input flex100"
-                                , onInput EnteredInterest
-                                , value form.interest
-                                , disabled isDisabled
-                                , plcH "profile.edit.placeholders.interests"
-                                , required True
-                                , maxlength 255
-                                ]
-                                []
-                            , button
-                                [ class "btn btn--outline flex000"
-                                , disabled isDisabled
-                                ]
-                                [ text_ "menu.add" ]
-                            ]
-                        , viewFieldError "interests" form.errors
-                        ]
-                    , div [ class "form-tags" ]
-                        (List.indexedMap
-                            (\index i ->
-                                div []
-                                    [ span [] [ text i ]
-                                    , button
-                                        [ type_ "button"
-                                        , onClick (ClickedRemoveInterest index)
-                                        ]
-                                        [ Icon.close "" ]
-                                    ]
-                            )
-                            form.interests
-                        )
-                    ]
-                ]
-            ]
-        , div [ class "btn-row" ]
-            [ button
-                [ classList
-                    [ ( "btn", True )
-                    , ( "btn--primary", True )
-                    , ( "btn--outline", True )
-                    ]
-                , disabled isDisabled
-                , type_ "button"
-                , onClick ClickedEditCancel
-                ]
-                [ text_ "menu.cancel" ]
-            , button
-                [ classList
-                    [ ( "btn", True )
-                    , ( "btn--primary", True )
-                    ]
-                , disabled isDisabled
-                ]
-                [ text_ "profile.edit.submit" ]
-            ]
-        ]
-
-
-viewAvatar : String -> Profile -> String -> AvatarStatus -> Html Msg
-viewAvatar ipfsUrl profile plchldr avatarS =
-    let
-        isUploading =
-            case avatarS of
-                NotAsked ->
-                    False
-
-                Sending _ _ ->
-                    True
-
-                SendingFailed _ _ ->
-                    False
-    in
-    div []
-        [ input
-            [ id "profile-upload-avatar"
-            , class "profile-img-input"
-            , type_ "file"
-            , accept "image/*"
-            , Page.onFileChange EnteredAvatar
-            , multiple False
-            , disabled isUploading
-            ]
-            []
-        , label
-            [ class "profile-img"
-            , for "profile-upload-avatar"
-            , title plchldr
-            ]
-            [ Avatar.view ipfsUrl profile.avatar "profile-img-avatar"
-            , if isUploading then
-                div [ class "profile-img-loading" ]
-                    [ div [ class "spinner" ] [] ]
-
-              else
-                div [ class "profile-img-hover" ] [ Icon.upload "" ]
-            ]
-        ]
-
-
-viewBadges : LoggedIn.Model -> Model -> Html msg
-viewBadges loggedIn model =
+viewTransferButton : Shared -> String -> Html msg
+viewTransferButton shared user =
     let
         text_ s =
-            text (t loggedIn.shared.translations s)
+            text (shared.translators.t s)
     in
-    div [ class "profile-badges" ]
-        [ h4 [ class "profile-title" ]
-            [ Icon.brightness7 ""
-            , span [] [ text_ "profile.badge.title" ]
+    div [ class "mt-3 mb-2" ]
+        [ a
+            [ class "button button-primary w-full"
+            , Route.href (Route.Transfer (Just user))
             ]
-        , div [ class "profile-badges-list" ]
-            [ div [ class "profile-badges-item profile-badges-item--inactive" ]
-                [ img [ src "images/badges-currency-starter.svg" ]
-                    []
-                , span [] [ text_ "profile.badge.currencyStarter" ]
-                ]
-            , div [ class "profile-badges-item" ]
-                [ img [ src "images/badge-developer.svg" ]
-                    []
-                , span [] [ text_ "profile.badge.developer" ]
-                ]
-            , div [ class "profile-badges-item" ]
-                [ img [ src "images/badge-seed-team.svg" ]
-                    []
-                , span [] [ text_ "profile.badge.seedTeam" ]
-                ]
-            , div [ class "profile-badges-item" ]
-                [ img [ src "images/badges-mentor.svg" ]
-                    []
-                , span [] [ text_ "profile.badge.mentor" ]
-                ]
-            ]
+            [ text_ "transfer.title" ]
         ]
 
 
+viewDownloadPdfErrorModal : Model -> LoggedIn.Model -> Html Msg
+viewDownloadPdfErrorModal model loggedIn =
+    let
+        modalVisibility =
+            case model.maybePdfDownloadedSuccessfully of
+                Just isDownloaded ->
+                    not isDownloaded
 
--- HELPERS
+                Nothing ->
+                    False
+
+        privateKey =
+            case LoggedIn.maybePrivateKey loggedIn of
+                Nothing ->
+                    ""
+
+                Just pk ->
+                    Eos.privateKeyToString pk
+
+        body =
+            [ p [ class "my-3" ]
+                [ text "Please, check if you have your 12 words saved during the registration process and use them for further signing in."
+                ]
+            , p [ class "my-3" ]
+                [ text "If you completely lost your 12 words, please, contact us and provide this private key and we will help you to recover:"
+                ]
+            , p [ class "font-bold my-3 text-lg text-center border p-4 rounded-sm bg-gray-100" ]
+                [ text privateKey
+                ]
+            ]
+    in
+    Modal.initWith
+        { closeMsg = ClickedClosePdfDownloadError
+        , isVisible = modalVisibility
+        }
+        |> Modal.withHeader "Sorry, we can't find your 12 words"
+        |> Modal.withBody body
+        |> Modal.toHtml
 
 
-formField : List (Html msg) -> Html msg
-formField =
-    div [ class "form-field" ]
+viewNewPinModal : Model -> Shared -> Html Msg
+viewNewPinModal model shared =
+    let
+        tr str =
+            text (shared.translators.t str)
+
+        body =
+            [ div []
+                [ p [ class "text-sm" ]
+                    [ tr "profile.changePinPrompt" ]
+                ]
+            , Pin.view shared.translators model.pinInputModel
+                |> Html.map GotPinMsg
+            ]
+    in
+    Modal.initWith
+        { closeMsg = ClickedCloseChangePin
+        , isVisible = model.isNewPinModalVisible
+        }
+        |> Modal.withHeader (shared.translators.t "profile.changePin")
+        |> Modal.withBody body
+        |> Modal.toHtml
 
 
-viewFieldError : String -> Dict String String -> Html msg
-viewFieldError fieldId errors =
-    case Dict.get fieldId errors of
-        Just e ->
-            span [ class "field-error" ] [ text e ]
+viewButton : String -> Msg -> Html Msg
+viewButton label msg =
+    button
+        [ class "button-secondary uppercase button-sm"
+        , onClick msg
+        ]
+        [ text label
+        ]
 
-        Nothing ->
-            text ""
+
+viewDangerButton : String -> Msg -> Html Msg
+viewDangerButton label msg =
+    button
+        [ class "button-secondary uppercase button-sm text-red border-red"
+        , onClick msg
+        ]
+        [ text label
+        ]
+
+
+viewContactButton : Translators -> Contact.Normalized -> Html msg
+viewContactButton translators normalized =
+    let
+        { contactType } =
+            Contact.unwrap normalized
+
+        textColor =
+            "text-" ++ Contact.contactTypeColor contactType
+    in
+    a
+        [ class ("button-secondary uppercase bg-gray-100 py-2 flex items-center justify-center border-none hover:bg-gray-200 " ++ textColor)
+        , Contact.toHref normalized
+        , target "_blank"
+        ]
+        [ Contact.contactTypeToIcon "mr-2 w-6 h-6" True contactType
+        , text (Contact.contactTypeToString translators contactType)
+        ]
 
 
 
@@ -545,199 +610,140 @@ type alias UpdateResult =
 
 type Msg
     = Ignored
-    | CompletedProfileLoad (Result (Graphql.Http.Error (Maybe Profile)) (Maybe Profile))
-    | ClickedEdit
-    | ClickedEditCancel
-    | ClickedSave
-    | EnteredName String
-    | EnteredEmail String
-    | EnteredBio String
-    | EnteredLocalization String
-    | EnteredInterest String
-    | ClickedAddInterest
-    | ClickedRemoveInterest Int
-    | EnteredAvatar (List File)
-    | CompletedAvatarUpload (Result Http.Error Avatar)
+    | DownloadPdf String
+    | DownloadPdfProcessed Bool
+    | ClickedClosePdfDownloadError
     | ClickedViewPrivateKeyAuth
-    | ClickedViewPrivateKey String
-    | ClickedClosePrivateKey
-    | RequestPush
-    | GotPushSub PushSubscription
-    | CompletedPushUpload (Result (Graphql.Http.Error ()) ())
+    | ClickedChangePin
+    | ChangePinSubmitted String
+    | GotPinMsg Pin.Msg
+    | ClickedCloseChangePin
+    | PinChanged
     | GotPushPreference Bool
+    | ToggleDeleteKycModal
+    | AddKycClicked
+    | DeleteKycAccepted
+    | DeleteKycAndAddressCompleted (RemoteData (Graphql.Http.Error DeleteKycAndAddressResult) DeleteKycAndAddressResult)
     | CheckPushPref
-    | DownloadPdf
 
 
 update : Msg -> Model -> LoggedIn.Model -> UpdateResult
 update msg model loggedIn =
+    let
+        t =
+            loggedIn.shared.translators.t
+
+        downloadPdfPort pin =
+            UR.addPort
+                { responseAddress = DownloadPdfProcessed False
+                , responseData = Encode.null
+                , data =
+                    Encode.object
+                        [ ( "name", Encode.string "downloadAuthPdfFromProfile" )
+                        , ( "pin", Encode.string pin )
+                        ]
+                }
+    in
     case msg of
         Ignored ->
             UR.init model
 
-        CompletedProfileLoad (Ok Nothing) ->
-            -- TODO: not found account
-            UR.init model
+        ToggleDeleteKycModal ->
+            { model | isDeleteKycModalShowed = not model.isDeleteKycModalShowed }
+                |> UR.init
 
-        CompletedProfileLoad (Ok (Just profile)) ->
-            UR.init { model | status = Loaded profile }
-
-        CompletedProfileLoad (Err err) ->
-            UR.init { model | status = LoadingFailed err }
-                |> UR.logGraphqlError msg err
-
-        ClickedEdit ->
-            case model.status of
-                Loaded profile ->
-                    { model | status = Editing profile NotAsked (Profile.profileToForm profile) }
-                        |> UR.init
-
-                _ ->
-                    UR.init model
-                        |> UR.logImpossible msg []
-
-        ClickedEditCancel ->
-            case model.status of
-                Editing profile avatarS form ->
-                    UR.init { model | status = Loaded profile }
-
-                _ ->
-                    UR.init model
-                        |> UR.logImpossible msg []
-
-        ClickedSave ->
-            case model.status of
-                Editing profile avatarS form ->
-                    { model | status = Saving profile avatarS form }
-                        |> UR.init
-                        |> UR.addCmd
-                            (Api.Graphql.mutation loggedIn.shared
-                                (Profile.mutation profile.account form)
-                                CompletedProfileLoad
-                            )
-
-                _ ->
-                    UR.init model
-                        |> UR.logImpossible msg []
-
-        EnteredName s ->
-            UR.init model
-                |> updateForm (\form -> { form | name = s })
-
-        EnteredEmail s ->
-            UR.init model
-                |> updateForm (\form -> { form | email = s })
-
-        EnteredBio s ->
-            UR.init model
-                |> updateForm (\form -> { form | bio = s })
-
-        EnteredLocalization s ->
-            UR.init model
-                |> updateForm (\form -> { form | localization = s })
-
-        EnteredInterest s ->
-            UR.init model
-                |> updateForm (\form -> { form | interest = s })
-
-        ClickedAddInterest ->
-            UR.init model
-                |> updateForm
-                    (\form ->
-                        { form
-                            | interest = ""
-                            , interests =
-                                form.interests
-                                    ++ (String.split "," form.interest
-                                            |> List.map String.trim
-                                       )
-                        }
+        AddKycClicked ->
+            model
+                |> UR.init
+                |> UR.addCmd
+                    (Route.ProfileAddKyc
+                        |> Route.replaceUrl loggedIn.shared.navKey
                     )
 
-        ClickedRemoveInterest index ->
-            UR.init model
-                |> updateForm
-                    (\form ->
-                        { form
-                            | interests =
-                                List.indexedMap
-                                    (\i intr ->
-                                        if i == index then
-                                            Nothing
+        DeleteKycAccepted ->
+            { model | isDeleteKycModalShowed = False }
+                |> UR.init
+                |> UR.addCmd (deleteKycAndAddress loggedIn)
+                |> UR.addExt (LoggedIn.UpdatedLoggedIn { loggedIn | profile = RemoteData.Loading })
 
-                                        else
-                                            Just intr
-                                    )
-                                    form.interests
-                                    |> List.filterMap identity
+        DeleteKycAndAddressCompleted resp ->
+            case resp of
+                RemoteData.Success _ ->
+                    model
+                        |> UR.init
+                        |> UR.addExt (LoggedIn.ReloadResource LoggedIn.ProfileResource)
+                        |> UR.addExt (ShowFeedback Feedback.Success (t "community.kyc.delete.success"))
+
+                RemoteData.Failure err ->
+                    model
+                        |> UR.init
+                        |> UR.logGraphqlError msg err
+                        |> UR.addExt (LoggedIn.ReloadResource LoggedIn.ProfileResource)
+
+                _ ->
+                    UR.init model
+
+        ClickedChangePin ->
+            if LoggedIn.hasPrivateKey loggedIn then
+                UR.init { model | isNewPinModalVisible = True }
+                    |> UR.addCmd
+                        (Dom.focus "pinInput"
+                            |> Task.attempt (\_ -> Ignored)
+                        )
+
+            else
+                UR.init model
+                    |> UR.addExt (Just ClickedChangePin |> RequiredAuthentication)
+                    |> UR.addCmd
+                        (Dom.focus "pinInput"
+                            |> Task.attempt (\_ -> Ignored)
+                        )
+
+        ChangePinSubmitted newPin ->
+            if LoggedIn.hasPrivateKey loggedIn then
+                let
+                    currentPin =
+                        case model.currentPin of
+                            Just pin ->
+                                pin
+
+                            Nothing ->
+                                loggedIn.auth.pinModel.pin
+                in
+                UR.init model
+                    |> UR.addPort
+                        { responseAddress = PinChanged
+                        , responseData = Encode.null
+                        , data =
+                            Encode.object
+                                [ ( "name", Encode.string "changePin" )
+                                , ( "currentPin", Encode.string currentPin )
+                                , ( "newPin", Encode.string newPin )
+                                ]
                         }
-                    )
 
-        EnteredAvatar (file :: _) ->
+            else
+                UR.init model
+                    |> UR.addExt (Just ClickedChangePin |> RequiredAuthentication)
+
+        GotPinMsg subMsg ->
             let
-                uploadAvatar file_ =
-                    Api.uploadAvatar loggedIn.shared file_ CompletedAvatarUpload
-
-                updateAvatar avatarS file_ =
-                    case avatarS of
-                        NotAsked ->
-                            ( Sending file_ 0
-                            , UR.addCmd (uploadAvatar file_)
-                            )
-
-                        SendingFailed _ _ ->
-                            ( Sending file_ 0
-                            , UR.addCmd (uploadAvatar file_)
-                            )
-
-                        Sending file__ progress ->
-                            ( Sending file__ progress
-                            , UR.logImpossible msg []
-                            )
-
-                toUResult model_ toStatus ( avatarS, addOrlog ) =
-                    UR.init { model_ | status = toStatus avatarS }
-                        |> addOrlog
+                ( newPinModel, submitStatus ) =
+                    Pin.update subMsg model.pinInputModel
             in
-            case model.status of
-                Editing profile avatarS form ->
-                    updateAvatar avatarS file
-                        |> toUResult model
-                            (\a -> Editing profile a form)
+            UR.init { model | pinInputModel = newPinModel }
+                |> UR.addCmd (Pin.maybeSubmitCmd submitStatus ChangePinSubmitted)
 
-                Saving profile avatarS form ->
-                    updateAvatar avatarS file
-                        |> toUResult model
-                            (\a -> Saving profile a form)
+        ClickedCloseChangePin ->
+            UR.init { model | isNewPinModalVisible = False }
 
-                _ ->
-                    UR.init model
-                        |> UR.logImpossible msg []
-
-        EnteredAvatar [] ->
-            UR.init model
-
-        CompletedAvatarUpload (Ok a) ->
-            UR.init model
-                |> updateForm (\f -> { f | avatar = Avatar.toMaybeString a })
-                |> updateProfile (\profile -> { profile | avatar = a })
-                |> updateAvatarStatus (\_ -> NotAsked)
-
-        CompletedAvatarUpload (Err err) ->
-            UR.init model
-                |> UR.logHttpError msg err
-                |> updateAvatarStatus
-                    (\avatarStatus ->
-                        case avatarStatus of
-                            NotAsked ->
-                                NotAsked
-
-                            SendingFailed file err_ ->
-                                SendingFailed file err
-
-                            Sending file progress ->
-                                SendingFailed file err
-                    )
+        PinChanged ->
+            { model
+                | isNewPinModalVisible = False
+                , currentPin = Just model.pinInputModel.pin
+            }
+                |> UR.init
+                |> UR.addExt (ShowFeedback Feedback.Success (t "profile.pin.successMsg"))
 
         ClickedViewPrivateKeyAuth ->
             case LoggedIn.maybePrivateKey loggedIn of
@@ -747,66 +753,31 @@ update msg model loggedIn =
                             (Just ClickedViewPrivateKeyAuth
                                 |> RequiredAuthentication
                             )
+                        |> UR.addCmd
+                            (Dom.focus "pinInput"
+                                |> Task.attempt (\_ -> Ignored)
+                            )
 
-                Just privateKey ->
-                    UR.init { model | privateKeyModal = Just privateKey }
-
-        ClickedViewPrivateKey privateKey ->
-            UR.init { model | privateKeyModal = Just privateKey }
-
-        ClickedClosePrivateKey ->
-            UR.init { model | privateKeyModal = Nothing }
-
-        RequestPush ->
-            case model.pushNotifications of
-                False ->
+                Just _ ->
                     model
                         |> UR.init
-                        |> UR.addPort
-                            { responseAddress = RequestPush
-                            , responseData = Encode.null
-                            , data =
-                                Encode.object
-                                    [ ( "name", Encode.string "requestPushPermission" ) ]
-                            }
+                        |> downloadPdfPort loggedIn.auth.pinModel.pin
 
-                True ->
-                    -- TODO : Tell Server Notification Is Disabled
-                    model
-                        |> UR.init
-                        |> UR.addPort
-                            { responseAddress = GotPushPreference False
-                            , responseData = Encode.null
-                            , data =
-                                Encode.object [ ( "name", Encode.string "disablePushPref" ) ]
-                            }
-
-        GotPushSub push ->
+        DownloadPdf pin ->
             model
                 |> UR.init
-                |> UR.addCmd
-                    (uploadPushSubscription loggedIn push)
+                |> downloadPdfPort pin
 
-        CompletedPushUpload res ->
-            case res of
-                Ok _ ->
-                    model
-                        |> UR.init
-                        |> UR.addPort
-                            { responseAddress = CompletedPushUpload res
-                            , responseData = Encode.null
-                            , data =
-                                Encode.object
-                                    [ ( "name", Encode.string "completedPushUpload" ) ]
-                            }
+        DownloadPdfProcessed isDownloaded ->
+            { model | maybePdfDownloadedSuccessfully = Just isDownloaded }
+                |> UR.init
 
-                Err err ->
-                    model
-                        |> UR.init
-                        |> UR.logGraphqlError msg err
+        ClickedClosePdfDownloadError ->
+            { model | maybePdfDownloadedSuccessfully = Nothing }
+                |> UR.init
 
         GotPushPreference val ->
-            { model | pushNotifications = val }
+            { model | isPushNotificationsEnabled = val }
                 |> UR.init
 
         CheckPushPref ->
@@ -819,116 +790,6 @@ update msg model loggedIn =
                         Encode.object [ ( "name", Encode.string "checkPushPref" ) ]
                     }
 
-        DownloadPdf ->
-            model
-                |> UR.init
-                |> UR.addPort
-                    { responseAddress = Ignored
-                    , responseData = Encode.null
-                    , data =
-                        Encode.object
-                            [ ( "name", Encode.string "printAuthPdf" ) ]
-                    }
-
-
-updateForm : (ProfileForm -> ProfileForm) -> UpdateResult -> UpdateResult
-updateForm transform ({ model } as uResult) =
-    case model.status of
-        Loading ->
-            uResult
-
-        LoadingFailed _ ->
-            uResult
-
-        Loaded _ ->
-            uResult
-
-        Editing profile avatarS form ->
-            { model | status = Editing profile avatarS (transform form) }
-                |> UR.setModel uResult
-
-        Saving profile avatarS form ->
-            { model | status = Saving profile avatarS (transform form) }
-                |> UR.setModel uResult
-
-
-updateProfile : (Profile -> Profile) -> UpdateResult -> UpdateResult
-updateProfile transform ({ model } as uResult) =
-    case model.status of
-        Loading ->
-            uResult
-
-        LoadingFailed _ ->
-            uResult
-
-        Loaded profile ->
-            { model | status = Loaded (transform profile) }
-                |> UR.setModel uResult
-
-        Editing profile avatarS form ->
-            { model | status = Editing (transform profile) avatarS form }
-                |> UR.setModel uResult
-
-        Saving profile avatarS form ->
-            { model | status = Saving (transform profile) avatarS form }
-                |> UR.setModel uResult
-
-
-updateAvatarStatus : (AvatarStatus -> AvatarStatus) -> UpdateResult -> UpdateResult
-updateAvatarStatus transform ({ model } as uResult) =
-    case model.status of
-        Loading ->
-            uResult
-
-        LoadingFailed _ ->
-            uResult
-
-        Loaded profile ->
-            uResult
-
-        Editing profile avatarS form ->
-            { model | status = Editing profile (transform avatarS) form }
-                |> UR.setModel uResult
-
-        Saving profile avatarS form ->
-            { model | status = Saving profile (transform avatarS) form }
-                |> UR.setModel uResult
-
-
-uploadPushSubscription : LoggedIn.Model -> PushSubscription -> Cmd Msg
-uploadPushSubscription { accountName, shared } data =
-    Api.Graphql.mutation shared
-        (PushSubscription.activatePushMutation accountName data)
-        CompletedPushUpload
-
-
-jsAddressToMsg : List String -> Value -> Maybe Msg
-jsAddressToMsg addr val =
-    case addr of
-        "RequestPush" :: _ ->
-            let
-                push =
-                    Decode.decodeValue (Decode.field "sub" Decode.string) val
-                        |> Result.andThen (Decode.decodeString Decode.value)
-                        |> Result.andThen (Decode.decodeValue PushSubscription.decode)
-            in
-            case push of
-                Ok res ->
-                    Just (GotPushSub res)
-
-                Err err ->
-                    -- TODO: Handle PushSubscription Decode error
-                    Nothing
-
-        "CompletedPushUpload" :: _ ->
-            decodePushPref val
-
-        "GotPushPreference" :: _ ->
-            decodePushPref val
-
-        _ ->
-            Nothing
-
 
 decodePushPref : Value -> Maybe Msg
 decodePushPref val =
@@ -937,68 +798,84 @@ decodePushPref val =
         |> Result.toMaybe
 
 
+decodeIsPdfDownloaded : Value -> Maybe Msg
+decodeIsPdfDownloaded val =
+    Decode.decodeValue (Decode.field "isDownloaded" Decode.bool) val
+        |> Result.map DownloadPdfProcessed
+        |> Result.toMaybe
+
+
+deleteKycAndAddress : LoggedIn.Model -> Cmd Msg
+deleteKycAndAddress { accountName, shared, authToken } =
+    Api.Graphql.mutation shared
+        (Just authToken)
+        (Profile.deleteKycAndAddressMutation accountName)
+        DeleteKycAndAddressCompleted
+
+
+jsAddressToMsg : List String -> Value -> Maybe Msg
+jsAddressToMsg addr val =
+    case addr of
+        "ClickedCloseChangePin" :: [] ->
+            Just ClickedCloseChangePin
+
+        "PinChanged" :: [] ->
+            Just PinChanged
+
+        "DownloadPdfProcessed" :: _ ->
+            decodeIsPdfDownloaded val
+
+        "ChangePinSubmitted" :: pin :: [] ->
+            Just (ChangePinSubmitted pin)
+
+        "GotPushPreference" :: _ ->
+            decodePushPref val
+
+        _ ->
+            Nothing
+
+
 msgToString : Msg -> List String
 msgToString msg =
     case msg of
         Ignored ->
             [ "Ignored" ]
 
-        CompletedProfileLoad r ->
-            [ "CompletedProfileLoad", UR.resultToString r ]
+        ToggleDeleteKycModal ->
+            [ "ToggleDeleteKycModal" ]
 
-        ClickedEdit ->
-            [ "ClickedEdit" ]
+        AddKycClicked ->
+            [ "AddKycClicked" ]
 
-        ClickedEditCancel ->
-            [ "ClickedEditCancel" ]
+        DeleteKycAccepted ->
+            [ "DeleteKycAccepted" ]
 
-        ClickedSave ->
-            [ "ClickedSave" ]
+        DeleteKycAndAddressCompleted _ ->
+            [ "DeleteKycAndAddressCompleted" ]
 
-        EnteredName _ ->
-            [ "EnteredName" ]
+        DownloadPdf _ ->
+            [ "DownloadPdf" ]
 
-        EnteredEmail _ ->
-            [ "EnteredEmail" ]
+        DownloadPdfProcessed _ ->
+            [ "DownloadPdfProcessed" ]
 
-        EnteredBio _ ->
-            [ "EnteredBio" ]
+        ClickedClosePdfDownloadError ->
+            [ "ClickedClosePdfDownloadError" ]
 
-        EnteredLocalization _ ->
-            [ "EnteredLocalization" ]
+        ClickedChangePin ->
+            [ "ClickedChangePin" ]
 
-        EnteredInterest _ ->
-            [ "EnteredInterest" ]
+        ClickedCloseChangePin ->
+            [ "ClickedCloseChangePin" ]
 
-        ClickedAddInterest ->
-            [ "ClickedAddInterest" ]
-
-        ClickedRemoveInterest _ ->
-            [ "ClickedRemoveInterest" ]
-
-        EnteredAvatar _ ->
-            [ "EnteredAvatar" ]
-
-        CompletedAvatarUpload r ->
-            [ "CompletedAvatarUpload", UR.resultToString r ]
+        PinChanged ->
+            [ "PinChanged" ]
 
         ClickedViewPrivateKeyAuth ->
             [ "ClickedViewPrivateKeyAuth" ]
 
-        ClickedViewPrivateKey _ ->
-            [ "ClickedViewPrivateKey" ]
-
-        ClickedClosePrivateKey ->
-            [ "ClickedClosePrivateKey" ]
-
-        RequestPush ->
-            [ "RequestPush" ]
-
-        GotPushSub _ ->
-            [ "GotPushSub" ]
-
-        CompletedPushUpload _ ->
-            [ "CompletedPushUpload" ]
+        ChangePinSubmitted pin ->
+            [ "ChangePinSubmitted", pin ]
 
         GotPushPreference _ ->
             [ "GotPushPreference" ]
@@ -1006,5 +883,5 @@ msgToString msg =
         CheckPushPref ->
             [ "CheckPushPref" ]
 
-        DownloadPdf ->
-            [ "DownloadPdf" ]
+        GotPinMsg subMsg ->
+            "GotPinMsg" :: Pin.msgToString subMsg

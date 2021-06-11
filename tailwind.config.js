@@ -5,84 +5,109 @@ module.exports = {
   // 1) Overwriting the default behaviour (this is what 'fontWeight' is doing)
   // 2) Add a new behaviour to the current one (using the 'extend' key below)
   theme: {
-    // Customize checkbox Icon for forms
-    customForms: theme => ({
-      default: {
-        checkbox: {
-          icon: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="12" height="12" rx="2" fill="#8ACC9E"/></svg>'
-        }
-      }
-    }),
     // Colors used on the 'Design System'
     colors: {
-      'black': '#000000',
-      'white': '#FFFFFF',
+      black: '#000000',
+      white: '#FFFFFF',
       gray: {
-        // '100': '#f5f5f5', // Tailwind original gray-100
         '100': '#F8F8F8',
         '200': '#eeeeee',
         '300': '#e0e0e0',
         '400': '#bdbdbd',
         '500': '#E7E7E7',
-        // '500': '#9e9e9e', // Tailwind original gray-500
-        // '600': '#757575',
-        '600': '#9e9e9e', // Tailwind original gray-500
+        '600': '#9E9E9E',
         '700': '#616161',
         '800': '#424242',
-        // '900': '#212121' // Tailwind original gray-900
         '900': '#999999'
       },
       purple: {
         '100': '#9B4198',
         '500': '#45469B'
       },
-      'red': '#DB1B1B',
-      'yellow': '#FFD200',
-      'green': '#8ACC9E',
-      'blue': '#00BDCD',
-      'orange': {
+      red: '#DB1B1B',
+      lightred: '#F56565',
+      yellow: '#FFD200',
+      green: '#8ACC9E',
+      blue: {
+        DEFAULT: '#00BDCD',
+        '600': '#4299E1'
+      },
+      orange: {
         '100': '#FAB15C',
         '300': '#F99D33',
         '500': '#F2663B'
       },
-      'indigo': {
+      indigo: {
         '100': '#6A6CAA',
         '500': '#45469B'
       }
     },
+    // Needed after updating to tailwind 2.0
+    screens: {
+      'xs-max': {
+        'max': '320px'
+      },
+      sm: '640px',
+      md: '768px',
+      lg: '1024px',
+      xl: '1280px'
+    },
+    // Needed after updating to tailwind 2.0
+    fontSize: {
+      caption: '0.625rem',
+      xs: '0.75rem',
+      sm: '0.875rem',
+      menu: '0.9125rem',
+      body: '0.9rem',
+      base: '1rem',
+      lg: '1.125rem',
+      xl: '1.25rem',
+      heading: '1.375rem',
+      '2xl': '1.5rem',
+      '3xl': '1.875rem',
+      '4xl': '2.25rem',
+      '5xl': '3rem',
+      '6xl': '4rem'
+    },
     // Customizing BorderRadius sizes
     borderRadius: {
       'none': '0',
-      'sm': '.125rem',
-      default: '.4rem',
+      DEFAULT: '0.4rem',
+      label: '0.313rem',
+      'md': '0.375rem',
       'lg': '1.25rem',
-      'full': '9999px'
+      'full': '9999px',
+      'large': '12px'
     },
     // Overwriting since the current font family only have these weights
     fontWeight: {
-      'light': 300,
-      'normal': 400,
-      'medium': 500,
-      'bold': 700
+      light: 300,
+      normal: 400,
+      medium: 600,
+      bold: 700
     },
     // transform keys
     rotate: {
+      '-90': '-90deg',
       '-45': '-45deg',
+      '90': '90deg',
       '135': '135deg',
       '180': '180deg'
     },
     extend: {
-      // TODO: Below are the colors that need to be removed after refactor
       colors: {
-        'body-blue': '#45469B',
-        'grey': '#D4D4D4',
+        grey: '#D4D4D4',
         'light-grey': '#EEEEEE',
         'text-grey': '#666666',
         'border-grey': '#E0E0E0',
-        'reward-green': '#8ACC9E',
-        'date-purple': '#45469B',
-        'button-orange': '#F99D33',
-        'date-red': '#E02020'
+        'body-black': '#4a4a4a',
+        'phone': '#999999',
+        'instagram': '#e1306c',
+        'telegram': '#30a8db',
+        'whatsapp': '#25d366'
+      },
+      boxShadow: {
+        outline: '0 0 0 3px rgb(250, 177, 92, 0.75)'
       },
       flexGrow: {
         '1': 1,
@@ -96,40 +121,51 @@ module.exports = {
         '9': 9
       },
       fontFamily: {
-        'sans': ['"Gotham Rounded"', 'sans-serif']
-      },
-      // TODO: move this to parent section to overwrite current behaviour
-      fontSize: {
-        'caption': '.625rem',
-        'menu': '.8125rem',
-        'body': '.875rem',
-        'heading': '1.375rem',
-        'title-h3': '1.875rem',
-        'title-h2': '2.375rem',
-        'title-h1': '3rem',
-        'hero': '3.375rem'
+        sans: ['Nunito', 'sans-serif']
       },
       spacing: {
+        heading: '1.375rem',
         '7': '1.75rem',
-        'heading': '1.375rem',
+        '9': '2.25rem',
         '14': '3.5rem',
-        'select': '18.75rem'
+        '29': '7.25rem',
+        '44': '11rem',
+        '72': '18rem',
+        '80': '20rem',
+        select: '18.75rem',
+        '1/3': '33%',
+        '1/2': '50%'
+      },
+      zIndex: {
+        '-10': '-10'
+      },
+      maxHeight: {
+        '108': '27rem'
+      },
+      minWidth: {
+        '100': '25rem'
       },
       lineHeight: {
         caption: 0.75
       },
       borderRadius: {
-        'sm': '0.25rem',
-        default: '0.75rem',
-        'super': '2.5rem'
+        xs: '0.125rem',
+        sm: '0.25rem',
+        super: '2.5rem'
       },
       inset: {
         '1': '1rem',
+        '-1': '-0.25rem',
         '1/2': '50%',
-        'modal': '10rem'
+        modal: '10rem',
+        'full': '100%'
       },
       width: {
-        'form': '45.625rem'
+        form: '45.625rem'
+      },
+      opacity: {
+        '10': '0.1',
+        '60': '0.6'
       }
     }
   },
@@ -154,12 +190,14 @@ module.exports = {
     require('tailwindcss-transforms')({
       '3d': false // defaults to false
     }),
-    require('@tailwindcss/custom-forms'),
+    require('@tailwindcss/forms'),
     // Pseudo-class to support hover on the parent's first child
     function ({ addVariant, e }) {
       addVariant('first-hover', ({ modifySelectors, separator }) => {
         modifySelectors(({ className }) => {
-          return `.${e(`first-hover${separator}${className}`)}:first-child:hover`
+          return `.${e(
+            `first-hover${separator}${className}`
+          )}:first-child:hover`
         })
       })
     },
@@ -184,5 +222,10 @@ module.exports = {
 
       addUtilities(rotateUtilities)
     }
-  ]
+  ],
+  purge: [
+    './src/**/*.elm',
+    './src/index.js'
+  ],
+  mode: 'jit'
 }

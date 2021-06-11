@@ -23,7 +23,10 @@ type alias ActionsOptionalArguments =
     { input : OptionalArgument Cambiatus.InputObject.ActionsInput }
 
 
-actions : (ActionsOptionalArguments -> ActionsOptionalArguments) -> SelectionSet decodesTo Cambiatus.Object.Action -> SelectionSet (List decodesTo) Cambiatus.Object.Objective
+actions :
+    (ActionsOptionalArguments -> ActionsOptionalArguments)
+    -> SelectionSet decodesTo Cambiatus.Object.Action
+    -> SelectionSet (List decodesTo) Cambiatus.Object.Objective
 actions fillInOptionals object_ =
     let
         filledInOptionals =
@@ -36,9 +39,16 @@ actions fillInOptionals object_ =
     Object.selectionForCompositeField "actions" optionalArgs object_ (identity >> Decode.list)
 
 
-community : SelectionSet decodesTo Cambiatus.Object.Community -> SelectionSet decodesTo Cambiatus.Object.Objective
+community :
+    SelectionSet decodesTo Cambiatus.Object.Community
+    -> SelectionSet decodesTo Cambiatus.Object.Objective
 community object_ =
     Object.selectionForCompositeField "community" [] object_ identity
+
+
+completedAt : SelectionSet (Maybe Cambiatus.ScalarCodecs.NaiveDateTime) Cambiatus.Object.Objective
+completedAt =
+    Object.selectionForField "(Maybe ScalarCodecs.NaiveDateTime)" "completedAt" [] (Cambiatus.ScalarCodecs.codecs |> Cambiatus.Scalar.unwrapCodecs |> .codecNaiveDateTime |> .decoder |> Decode.nullable)
 
 
 createdAt : SelectionSet Cambiatus.ScalarCodecs.DateTime Cambiatus.Object.Objective
@@ -61,7 +71,9 @@ createdTx =
     Object.selectionForField "String" "createdTx" [] Decode.string
 
 
-creator : SelectionSet decodesTo Cambiatus.Object.Profile -> SelectionSet decodesTo Cambiatus.Object.Objective
+creator :
+    SelectionSet decodesTo Cambiatus.Object.User
+    -> SelectionSet decodesTo Cambiatus.Object.Objective
 creator object_ =
     Object.selectionForCompositeField "creator" [] object_ identity
 
@@ -79,3 +91,8 @@ description =
 id : SelectionSet Int Cambiatus.Object.Objective
 id =
     Object.selectionForField "Int" "id" [] Decode.int
+
+
+isCompleted : SelectionSet Bool Cambiatus.Object.Objective
+isCompleted =
+    Object.selectionForField "Bool" "isCompleted" [] Decode.bool

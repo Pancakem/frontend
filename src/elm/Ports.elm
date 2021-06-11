@@ -1,17 +1,18 @@
 port module Ports exposing
     ( JavascriptOut
     , JavascriptOutModel
+    , getRecentSearches
+    , gotRecentSearches
     , javascriptInPort
     , javascriptOut
     , javascriptOutCmd
     , mapAddress
+    , storeAuthToken
     , storeLanguage
+    , storeRecentSearches
+    , storeSelectedCommunitySymbol
     )
 
-import Eos exposing (Symbol)
-import Eos.Account as Eos
-import Json.Decode as Decode
-import Json.Decode.Pipeline as Decode exposing (optional, required)
 import Json.Encode as Encode exposing (Value)
 
 
@@ -65,23 +66,33 @@ port javascriptInPort : (Value -> msg) -> Sub msg
 port storeLanguage : String -> Cmd msg
 
 
+{-| Store recent searches to the `localStorage`.
+-}
+port storeRecentSearches : String -> Cmd msg
+
+
+{-| Ping JS to send back the recent searches from the `localStorage`.
+-}
+port getRecentSearches : () -> Cmd msg
+
+
+{-| Stores the auth token given by the server after signing in.
+-}
+port storeAuthToken : String -> Cmd msg
+
+
+{-| Store the selected community symbol. Useful for when running the app with
+`USE_SUBDOMAIN = false`
+-}
+port storeSelectedCommunitySymbol : String -> Cmd msg
+
+
 
 --
--- Callbacks
+-- Subscriptions
 --
--- Helpers
 
 
-decodeAccountNameOrStringError : Value -> Result String ( Eos.Name, Maybe String )
-decodeAccountNameOrStringError value =
-    Decode.decodeValue
-        (Decode.succeed (\accountName maybePrivateKey -> ( accountName, maybePrivateKey ))
-            |> Decode.required "accountName" Eos.nameDecoder
-            |> Decode.optional "privateKey" (Decode.nullable Decode.string) Nothing
-        )
-        value
-        |> Result.mapError
-            (\s ->
-                Decode.decodeValue Decode.string value
-                    |> Result.withDefault "Failed to decode"
-            )
+{-| Receive recent searches from JS.
+-}
+port gotRecentSearches : (String -> msg) -> Sub msg

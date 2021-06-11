@@ -1,53 +1,74 @@
-module Auth exposing (ExternalMsg(..), Model, Msg, PrivateKeyLogin, init, initRegister, isAuth, jsAddressToMsg, maybePrivateKey, msgToString, subscriptions, update, view, viewFieldLabel)
+module Auth exposing
+    ( ExternalMsg(..)
+    , Model
+    , Msg
+    , SignInResponse
+    , hasPrivateKey
+    , init
+    , jsAddressToMsg
+    , maybePrivateKey
+    , msgToString
+    , signIn
+    , update
+    , view
+    )
 
-import Api
-import Asset.Icon as Icon
-import Browser.Dom as Dom
+{-| Authentication of a user with Passphrase or Private Key.
+
+  - Passphrase consists of 12 unique words given to the user during the registration. Only users knows this phrase.
+  - Private Key (PK) is a hashed analogue of a Passphrase.
+  - PIN is used to encrypt the Passphrase/PK in the browser. Each time the user logs-in the new PIN is created.
+
+This module handles already logged in users, so we already know we have all the data we need in localStorage.
+For more information on the login process, checkout the Login module.
+
+After having logged in at least once, the data we need is stored in localStorage.
+If we need to prove the user is authenticated (and haven't done so in this session),
+we can request the user to type in the PIN they created when signing in the last time,
+so we can retrieve their Private Key from localStorage.
+
+-}
+
+import Api.Graphql
+import Cambiatus.Mutation
+import Cambiatus.Object.Session
 import Eos.Account as Eos
-import Flags
-import Html exposing (..)
-import Html.Attributes exposing (..)
-import Html.Events exposing (keyCode, on, onClick, onInput, onSubmit)
-import Http
-import I18Next exposing (t)
+import Graphql.Http
+import Graphql.Operation exposing (RootMutation)
+import Graphql.OptionalArgument as OptionalArgument
+import Graphql.SelectionSet exposing (SelectionSet, with)
+import Html exposing (Html, div, p, text)
+import Html.Attributes exposing (class)
 import Json.Decode as Decode
-import Json.Decode.Pipeline as Decode
+import Json.Decode.Pipeline as DecodePipeline
 import Json.Encode as Encode exposing (Value)
-import List.Extra as LE
-import Log
-import Profile exposing (Profile)
-import Route
-import Session.Shared as Shared exposing (Shared)
-import Task
+import Ports
+import Profile
+import RemoteData exposing (RemoteData)
+import Session.Shared exposing (Shared)
 import UpdateResult as UR
+import View.Pin as Pin
 
 
 
 -- INIT
 
 
-init : Shared -> Model
-init shared =
-    case shared.maybeAccount of
-        Just ( _, True ) ->
-            { initModel | status = LoginWithPin }
+init : Maybe Eos.PrivateKey -> Model
+init maybePrivateKey_ =
+    let
+        status =
+            case maybePrivateKey_ of
+                Nothing ->
+                    WithoutPrivateKey
 
-        _ ->
-            initModel
-
-
-initRegister : String -> Model
-initRegister pk =
-    { initModel | status = LoggedInWithPin pk }
-
-
-
--- SUBSCRIPTIONS
-
-
-subscriptions : Model -> Sub Msg
-subscriptions _ =
-    Sub.none
+                Just privateKey ->
+                    WithPrivateKey privateKey
+    in
+    { status = status
+    , error = Nothing
+    , pinModel = initPinModel status
+    }
 
 
 
@@ -56,90 +77,62 @@ subscriptions _ =
 
 type alias Model =
     { status : Status
-    , loginError : Maybe String
-    , form : PrivateKeyLogin
-    , pinVisibility : Bool
+    , error : Maybe String
+    , pinModel : Pin.Model
     }
 
 
-initModel : Model
-initModel =
-    { status = Options
-    , loginError = Nothing
-    , form = initPrivateKeyLogin
-    , pinVisibility = True
-    }
+initPinModel : Status -> Pin.Model
+initPinModel status =
+    Pin.init
+        { label = "auth.pinPopup.label"
+        , id = "pinPopup"
+        , withConfirmation = False
+        , submitLabel = "auth.login.continue"
+        , submittingLabel = "auth.login.continue"
+        }
+        |> Pin.withDisabled
+            (case status of
+                WithoutPrivateKey ->
+                    False
+
+                WithPrivateKey _ ->
+                    True
+            )
 
 
+{-| Represents the state of the user's authentication. A user can be:
+
+  - Authenticated, but without the private key - This means the user is logged in,
+    but we don't have their PIN, so we can't get their private key. If we ever need
+    the user's private key, we should prompt them for their PIN
+  - Authenticated, with private key - This means the user is logged in and we
+    have access to their private key. The user can perform actions that need
+    authentication without having to type in their PIN
+
+-}
 type Status
-    = Options
-    | LoginWithPrivateKey PrivateKeyLogin
-    | LoginWithPrivateKeyAccounts (List Eos.Name) PrivateKeyLogin
-    | LoggingInWithPrivateKeyAccounts (List Eos.Name) PrivateKeyLogin
-    | LoggingInWithPrivateKey PrivateKeyLogin
-    | LoggedInWithPrivateKey PrivateKey
-    | LoginWithPin
-    | LoggingInWithPin
-    | LoggedInWithPin PrivateKey
+    = WithoutPrivateKey
+    | WithPrivateKey Eos.PrivateKey
 
 
-type alias PrivateKeyLogin =
-    { privateKey : String
-    , usePin : Maybe String
-    , enteredPin : List (Maybe String)
-    }
-
-
-initPrivateKeyLogin : PrivateKeyLogin
-initPrivateKeyLogin =
-    { privateKey = ""
-    , usePin = Nothing
-    , enteredPin = List.repeat 6 Nothing
-    }
-
-
-encodePrivateKeyLogin : PrivateKeyLogin -> Value
-encodePrivateKeyLogin pk =
-    Encode.object
-        [ ( "privateKey", Encode.string pk.privateKey )
-        , ( "usePin"
-          , case pk.usePin of
-                Nothing ->
-                    Encode.null
-
-                Just pin ->
-                    Encode.string pin
-          )
-        ]
-
-
-type alias PrivateKey =
-    String
-
-
-isAuth : Model -> Bool
-isAuth model =
+hasPrivateKey : Model -> Bool
+hasPrivateKey model =
     case model.status of
-        LoggedInWithPin _ ->
+        WithPrivateKey _ ->
             True
 
-        LoggedInWithPrivateKey _ ->
-            True
-
-        _ ->
+        WithoutPrivateKey ->
             False
 
 
-maybePrivateKey : Model -> Maybe String
+maybePrivateKey : Model -> Maybe Eos.PrivateKey
 maybePrivateKey model =
     case model.status of
-        LoggedInWithPin pk ->
+        WithPrivateKey pk ->
             Just pk
 
-        LoggedInWithPrivateKey pk ->
-            Just pk
-
-        _ ->
+        WithoutPrivateKey ->
             Nothing
 
 
@@ -147,324 +140,27 @@ maybePrivateKey model =
 -- VIEW
 
 
-view : Bool -> Shared -> Model -> List (Html Msg)
-view isModal shared model =
-    case model.status of
-        Options ->
-            viewOptions isModal shared model
-
-        LoginWithPrivateKey _ ->
-            viewOptions isModal shared model
-
-        LoginWithPrivateKeyAccounts accounts form ->
-            viewMultipleAccount accounts form False isModal shared model
-
-        LoggingInWithPrivateKeyAccounts accounts form ->
-            viewMultipleAccount accounts form True isModal shared model
-
-        LoggingInWithPrivateKey form ->
-            viewLoginWithPrivateKeyLogin form True isModal shared model
-
-        LoggedInWithPrivateKey _ ->
-            viewOptions isModal shared model
-
-        LoginWithPin ->
-            case shared.maybeAccount of
-                Just ( accountName, True ) ->
-                    viewLoginWithPin accountName False isModal shared model
-
-                _ ->
-                    viewOptions isModal shared model
-
-        LoggingInWithPin ->
-            case shared.maybeAccount of
-                Just ( accountName, True ) ->
-                    viewLoginWithPin accountName True isModal shared model
-
-                _ ->
-                    viewOptions isModal shared model
-
-        LoggedInWithPin _ ->
-            case shared.maybeAccount of
-                Just ( accountName, True ) ->
-                    viewLoginWithPin accountName True isModal shared model
-
-                _ ->
-                    viewOptions isModal shared model
-
-
-viewOptions : Bool -> Shared -> Model -> List (Html Msg)
-viewOptions isModal shared model =
+{-| Modal that asks for the user's PIN whenever needed. They must be authenticated
+already (`WithPrivateKey` or `WithoutPrivateKey`)
+-}
+view : Shared -> Model -> List (Html Msg)
+view shared model =
     let
-        text_ s =
-            Html.text (t shared.translations s)
+        { t } =
+            shared.translators
     in
-    [ div [ class "" ]
-        [ if not isModal then
-            viewAuthTabs shared
-
-          else
-            text ""
-        , viewAuthError shared model.loginError
-        ]
-    , div [ class "card__auth__input" ]
-        [ viewFieldLabel shared "auth.login.wordsMode.input" "privateKey" Nothing
-        , input
-            [ class "input auth__input"
-            , type_ "text"
-            , id "privateKey"
-            , value model.form.privateKey
-            , onInput EnteredPrivateKey
-            , required True
-            , autocomplete False
+    [ div []
+        [ p
+            [ class "modal-header px-0"
             ]
-            []
-        ]
-    , div []
-        [ div [ class "card__auth__pin__form" ]
-            [ viewLoginPinForm model shared ]
-        ]
-    , button
-        [ class "btn btn--primary btn--login"
-        , onClick (SubmittedLoginPrivateKey model.form)
-        ]
-        [ text_ "auth.login.submit" ]
-    , if not isModal then
-        a [ Route.href (Route.Register Nothing Nothing), class "card__auth__prompt" ]
-            [ span [] [ text_ "auth.login.register" ]
-            , span [ class "card__auth__login__mode" ] [ text_ "auth.login.registerLink" ]
+            [ text <| t "auth.login.modalFormTitle"
             ]
-
-      else
-        text ""
+        , p [ class "text-sm" ]
+            [ text <| t "auth.login.enterPinToContinue" ]
+        ]
+    , Pin.view shared.translators model.pinModel
+        |> Html.map GotPinMsg
     ]
-
-
-viewLoginWithPrivateKeyLogin : PrivateKeyLogin -> Bool -> Bool -> Shared -> Model -> List (Html Msg)
-viewLoginWithPrivateKeyLogin form isDisabled isModal shared model =
-    let
-        text_ s =
-            Html.text (t shared.translations s)
-    in
-    [ div [ class "card__login-header" ]
-        [ h2 [ class "card__title" ]
-            [ text_ "auth.loginPrivatekey" ]
-        , viewAuthError shared model.loginError
-        , button
-            [ class "card__close-btn"
-            , onClick ClickedViewOptions
-            , type_ "button"
-            , disabled isDisabled
-            , title (t shared.translations "menu.cancel")
-            ]
-            [ Icon.close "" ]
-        ]
-    , Html.form
-        [ onSubmit (SubmittedLoginPrivateKey form) ]
-        [ div [ class "input-group" ]
-            [ input
-                [ class "input input--login flex100"
-                , type_ "text"
-                , value form.privateKey
-                , onInput EnteredPrivateKey
-                , placeholder (t shared.translations "auth.loginPrivatekeyPlaceholder")
-                , required True
-                , disabled isDisabled
-                ]
-                []
-            , button
-                [ class "btn btn--primary btn--login flex000"
-                , disabled isDisabled
-                ]
-                [ text_ "auth.login" ]
-            ]
-        ]
-    ]
-
-
-viewMultipleAccount : List Eos.Name -> PrivateKeyLogin -> Bool -> Bool -> Shared -> Model -> List (Html Msg)
-viewMultipleAccount accounts form isDisabled isModal shared model =
-    let
-        text_ s =
-            Html.text (t shared.translations s)
-
-        btnClass =
-            class "btn btn--outline btn--login"
-    in
-    div [ class "card__login-header" ]
-        [ h2 [ class "card__title" ]
-            [ text_ "auth.chooseAccount" ]
-        , viewAuthError shared model.loginError
-        , button
-            [ class "card__close-btn"
-            , onClick ClickedViewOptions
-            , type_ "button"
-            , disabled isDisabled
-            , title (t shared.translations "menu.cancel")
-            ]
-            [ Icon.close "" ]
-        ]
-        :: List.map
-            (\a ->
-                button
-                    [ btnClass
-                    , disabled isDisabled
-                    , onClick (ClickedPrivateKeyAccount a form)
-                    ]
-                    [ text (Eos.nameToString a) ]
-            )
-            accounts
-
-
-viewLoginWithPin : Eos.Name -> Bool -> Bool -> Shared -> Model -> List (Html Msg)
-viewLoginWithPin accountName isDisabled isModal shared model =
-    let
-        text_ s =
-            Html.text (t shared.translations s)
-
-        tr id_ replaces =
-            I18Next.tr shared.translations I18Next.Curly id_ replaces
-    in
-    [ div [ class "card__login-header" ]
-        [ p [ class "card__pin__prompt" ]
-            [ text (tr "auth.loginPin" [ ( "accountName", Eos.nameToString accountName ) ]) ]
-        , viewAuthError shared model.loginError
-        ]
-    , Html.form
-        [ class "card__pin__input__group"
-        , onSubmit SubmittedLoginPIN
-        ]
-        [ viewLoginPinForm model shared
-        , button
-            [ class "btn btn--primary btn--login flex000"
-            , disabled isDisabled
-            ]
-            [ text_ "auth.login.submit" ]
-        ]
-    ]
-
-
-viewAuthTabs : Shared -> Html msg
-viewAuthTabs { translations } =
-    let
-        text_ : String -> Html msg
-        text_ s =
-            text (t translations s)
-    in
-    div [ class "card__auth__tabs__login" ]
-        [ div [ class "disabled" ]
-            [ a [ Route.href (Route.Register Nothing Nothing) ]
-                [ p [] [ text_ "auth.login.registerTab" ] ]
-            ]
-        , div [ class "enabled" ] [ p [] [ text_ "auth.login.loginTab" ] ]
-        ]
-
-
-viewAuthError : Shared -> Maybe String -> Html Msg
-viewAuthError shared maybeLoginError =
-    case maybeLoginError of
-        Nothing ->
-            text ""
-
-        Just error ->
-            div [ class "bg-red border-lg rounded p-4 mt-2" ]
-                [ p [ class "text-white" ] [ text (t shared.translations "error.accountNotFound") ]
-                ]
-
-
-viewLoginPinForm : Model -> Shared -> Html Msg
-viewLoginPinForm model shared =
-    let
-        inputs =
-            List.range 0 5
-                |> List.map (\pos -> digitInput pos model)
-    in
-    div [ class "card__auth__pin__section" ]
-        [ viewFieldLabel shared "auth.pin" "pin_input_0" (Just (toggleViewPin model))
-        , div [] inputs
-        ]
-
-
-toggleViewPin : Model -> Html Msg
-toggleViewPin model =
-    button [ class "", onClick TogglePinVisibility ]
-        [ if model.pinVisibility then
-            img [ src "/icons/eye-show.svg" ] []
-
-          else
-            img [ src "/icons/eye-close.svg" ] []
-        ]
-
-
-digitInput : Int -> Model -> Html Msg
-digitInput position { form, pinVisibility } =
-    let
-        itemVal =
-            Maybe.andThen
-                identity
-                (LE.getAt position form.enteredPin)
-
-        val =
-            case itemVal of
-                Just dig ->
-                    dig
-
-                Nothing ->
-                    ""
-
-        passwordAttributes =
-            if pinVisibility then
-                [ type_ "number"
-                ]
-
-            else
-                [ type_ "password"
-                , class "card__auth__pin__input__password"
-                , attribute "inputmode" "numeric"
-                ]
-    in
-    input
-        ([ class "card__auth__pin__input appearance-none"
-         , id ("pin_input_" ++ String.fromInt position)
-         , pattern "[0-9]*"
-         , maxlength 1
-         , value val
-         , onInput (EnteredPinDigit position)
-         , required True
-         , autocomplete False
-         ]
-            ++ passwordAttributes
-        )
-        []
-
-
-viewFieldLabel : Shared -> String -> String -> Maybe (Html msg) -> Html msg
-viewFieldLabel { translations } tSuffix id_ maybeView =
-    let
-        labelText : String
-        labelText =
-            t translations (tSuffix ++ ".label")
-
-        tooltipText : String
-        tooltipText =
-            t translations (tSuffix ++ ".tooltip")
-    in
-    label [ for id_ ]
-        [ div [ class "tooltip__text" ]
-            [ span [ class "card__auth__label" ] [ Html.text labelText ]
-            , Maybe.withDefault (text "") maybeView
-            , if String.isEmpty tooltipText then
-                div [] [ Html.text "" ]
-
-              else
-                button
-                    [ class "tooltip"
-                    , type_ "button"
-                    , attribute "tooltip" tooltipText
-                    ]
-                    [ img [ src "/icons/tooltip.svg" ] [] ]
-            ]
-        ]
 
 
 
@@ -477,24 +173,20 @@ type alias UpdateResult =
 
 type Msg
     = Ignored
-    | ClickedViewOptions
-    | EnteredPrivateKey String
-    | SubmittedLoginPrivateKey PrivateKeyLogin
-    | GotMultipleAccountsLogin (List Eos.Name)
-    | ClickedPrivateKeyAccount Eos.Name PrivateKeyLogin
-    | GotPrivateKeyLogin (Result String ( Eos.Name, String ))
-    | SubmittedLoginPIN
-    | GotPinLogin (Result String ( Eos.Name, String ))
-    | CompletedLoadProfile Status Eos.Name (Result Http.Error Profile)
-    | CompletedCreateProfile Status Eos.Name (Result Http.Error Profile)
-    | EnteredPinDigit Int String
-    | TogglePinVisibility
+    | GotPinMsg Pin.Msg
+    | SubmittedPin String
+    | GotSubmittedPinResponse (Result String ( Eos.Name, Eos.PrivateKey ))
+    | CompletedSignIn Status (RemoteData (Graphql.Http.Error (Maybe SignInResponse)) (Maybe SignInResponse))
+
+
+type alias SignInResponse =
+    { user : Profile.Model
+    , token : String
+    }
 
 
 type ExternalMsg
-    = ClickedCancel
-    | CompletedAuth Profile
-    | UpdatedShared Shared
+    = CompletedAuth SignInResponse Model
 
 
 update : Msg -> Shared -> Model -> UpdateResult
@@ -503,294 +195,121 @@ update msg shared model =
         Ignored ->
             UR.init model
 
-        ClickedViewOptions ->
-            UR.init
-                { model
-                    | loginError = Nothing
-                    , status = Options
-                }
-
-        EnteredPrivateKey s ->
+        GotPinMsg subMsg ->
             let
-                currentForm =
-                    model.form
-
-                newForm =
-                    { currentForm | privateKey = s }
+                ( newPinModel, submitStatus ) =
+                    Pin.update subMsg model.pinModel
             in
-            { model | form = newForm }
+            { model | pinModel = newPinModel }
                 |> UR.init
+                |> UR.addCmd (Pin.maybeSubmitCmd submitStatus SubmittedPin)
 
-        SubmittedLoginPrivateKey form ->
-            if List.any (\a -> a == Nothing) form.enteredPin then
-                { model | loginError = Just "Please fill in all the PIN digits" }
-                    |> UR.init
-
-            else
-                let
-                    pinString =
-                        form.enteredPin
-                            |> List.map (\a -> Maybe.withDefault "" a)
-                            |> List.foldl (\a b -> a ++ b) ""
-
-                    newForm =
-                        { form | usePin = Just pinString }
-                in
-                { model | form = newForm }
-                    |> UR.init
-                    |> UR.addPort
-                        { responseAddress = SubmittedLoginPrivateKey form
-                        , responseData = Encode.null
-                        , data =
-                            Encode.object
-                                [ ( "name", Encode.string "loginWithPrivateKey" )
-                                , ( "form", encodePrivateKeyLogin newForm )
-                                ]
-                        }
-
-        GotMultipleAccountsLogin accounts ->
-            UR.init
-                { model
-                    | status =
-                        case model.status of
-                            LoggingInWithPrivateKey form ->
-                                LoginWithPrivateKeyAccounts accounts form
-
-                            _ ->
-                                model.status
-                }
-
-        ClickedPrivateKeyAccount accountName form ->
-            UR.init
-                { model
-                    | status =
-                        case model.status of
-                            LoginWithPrivateKeyAccounts accounts frm ->
-                                LoggingInWithPrivateKeyAccounts accounts frm
-
-                            _ ->
-                                model.status
-                }
-                |> UR.addPort
-                    { responseAddress = ClickedPrivateKeyAccount accountName form
-                    , responseData = Encode.null
-                    , data =
-                        Encode.object
-                            [ ( "name", Encode.string "loginWithPrivateKeyAccount" )
-                            , ( "accountName", Eos.encodeName accountName )
-                            , ( "form", encodePrivateKeyLogin form )
-                            ]
-                    }
-
-        GotPrivateKeyLogin (Ok ( accountName, privateKey )) ->
-            UR.init model
-                |> UR.addCmd (Api.signIn shared accountName (CompletedLoadProfile (LoggedInWithPrivateKey privateKey) accountName))
-
-        GotPrivateKeyLogin (Err err) ->
-            UR.init
-                { model
-                    | loginError = Just err
-                    , status =
-                        case model.status of
-                            LoggingInWithPrivateKey form ->
-                                LoginWithPrivateKey form
-
-                            LoggingInWithPrivateKeyAccounts accounts form ->
-                                LoginWithPrivateKeyAccounts accounts form
-
-                            _ ->
-                                model.status
-                }
-
-        SubmittedLoginPIN ->
-            case List.any (\a -> a == Nothing) model.form.enteredPin of
-                True ->
-                    { model | loginError = Just "Please fill in all the PIN digits" }
-                        |> UR.init
-
-                False ->
-                    let
-                        pinString =
-                            model.form.enteredPin
-                                |> List.map (\a -> Maybe.withDefault "" a)
-                                |> List.foldl (\a b -> a ++ b) ""
-                    in
-                    UR.init { model | status = LoggingInWithPin }
-                        |> UR.addPort
-                            { responseAddress = SubmittedLoginPIN
-                            , responseData = Encode.null
-                            , data =
-                                Encode.object
-                                    [ ( "name", Encode.string "loginWithPin" )
-                                    , ( "pin", Encode.string pinString )
-                                    ]
-                            }
-
-        GotPinLogin (Ok ( accountName, privateKey )) ->
-            UR.init model
-                |> UR.addCmd (Api.signIn shared accountName (CompletedLoadProfile (LoggedInWithPin privateKey) accountName))
-
-        GotPinLogin (Err err) ->
-            UR.init
-                { model
-                    | loginError = Just err
-                    , status =
-                        case model.status of
-                            LoggingInWithPin ->
-                                LoginWithPin
-
-                            _ ->
-                                model.status
-                }
-
-        CompletedLoadProfile newStatus accountName (Ok profile) ->
-            UR.init { model | status = newStatus }
-                |> UR.addExt (CompletedAuth profile)
-                |> UR.addPort
-                    { responseAddress = CompletedLoadProfile newStatus accountName (Ok profile)
-                    , responseData = Encode.null
-                    , data =
-                        Encode.object
-                            [ ( "name", Encode.string "chatCredentials" )
-                            , ( "container", Encode.string "chat-manager" )
-                            , ( "credentials", Profile.encodeProfileChat profile )
-                            , ( "notificationAddress"
-                              , Encode.list Encode.string [ "GotPageMsg", "GotLoggedInMsg", "ReceivedNotification" ]
-                              )
-                            ]
-                    }
-
-        CompletedLoadProfile newStatus accountName (Err err) ->
-            case err of
-                Http.BadStatus 404 ->
-                    UR.init model
-                        |> UR.addCmd
-                            (Api.signUp shared
-                                { name = ""
-                                , email = ""
-                                , account = accountName
-                                , invitationId = Nothing
-                                }
-                                (CompletedCreateProfile newStatus accountName)
-                            )
-
-                _ ->
-                    loginFailed err model
-
-        CompletedCreateProfile newStatus accountName (Ok _) ->
-            UR.init model
-                |> UR.addCmd (Api.signIn shared accountName (CompletedLoadProfile newStatus accountName))
-
-        CompletedCreateProfile _ _ (Err err) ->
-            loginFailed err model
-
-        EnteredPinDigit pos data ->
+        CompletedSignIn status (RemoteData.Success (Just ({ token } as signInResponse))) ->
             let
-                currentForm =
-                    model.form
-
-                newPin =
-                    if data == "" then
-                        LE.setAt pos Nothing model.form.enteredPin
-
-                    else
-                        LE.setAt pos (Just data) model.form.enteredPin
-
-                nextFocusPosition : Int
-                nextFocusPosition =
-                    if data == "" then
-                        pos - 1
-
-                    else
-                        pos + 1
+                newModel =
+                    { model
+                        | status = status
+                        , pinModel = Pin.withDisabled False model.pinModel
+                    }
             in
-            { model | form = { currentForm | enteredPin = newPin } }
+            newModel
                 |> UR.init
+                |> UR.addCmd (Ports.storeAuthToken token)
+                |> UR.addExt (CompletedAuth signInResponse newModel)
+
+        CompletedSignIn _ (RemoteData.Success Nothing) ->
+            model
+                |> authFailed "error.unknown"
+                |> UR.logDebugValue msg (Encode.string "CompletedSignIn with Nothing")
+
+        CompletedSignIn _ (RemoteData.Failure err) ->
+            model
+                |> authFailed "auth.failed"
+                |> UR.logGraphqlError msg err
                 |> UR.addPort
                     { responseAddress = Ignored
                     , responseData = Encode.null
+                    , data = Encode.object [ ( "name", Encode.string "logout" ) ]
+                    }
+
+        CompletedSignIn _ RemoteData.NotAsked ->
+            UR.init model
+
+        CompletedSignIn _ RemoteData.Loading ->
+            UR.init model
+
+        SubmittedPin pin ->
+            { model | pinModel = Pin.withDisabled True model.pinModel }
+                |> UR.init
+                |> UR.addPort
+                    { responseAddress = SubmittedPin pin
+                    , responseData = Encode.null
                     , data =
                         Encode.object
-                            [ ( "pos", Encode.int pos )
-                            , ( "data", Encode.string data )
-                            , ( "iswithinif", Encode.bool True )
+                            [ ( "name", Encode.string "getPrivateKey" )
+                            , ( "pin", Encode.string pin )
                             ]
                     }
-                |> UR.addCmd (Task.attempt (\_ -> Ignored) (Dom.focus ("pin_input_" ++ String.fromInt nextFocusPosition)))
 
-        TogglePinVisibility ->
-            { model | pinVisibility = not model.pinVisibility } |> UR.init
+        GotSubmittedPinResponse (Ok ( accountName, privateKey )) ->
+            UR.init model
+                |> UR.addCmd
+                    (Api.Graphql.mutation shared
+                        Nothing
+                        (signIn accountName shared Nothing)
+                        (CompletedSignIn (WithPrivateKey privateKey))
+                    )
+
+        GotSubmittedPinResponse (Err err) ->
+            model
+                |> authFailed err
+                |> UR.logDebugValue msg (Encode.string err)
 
 
-loginFailed : Http.Error -> Model -> UpdateResult
-loginFailed httpError model =
-    UR.init
-        { model
-            | loginError =
-                case httpError of
-                    Http.BadStatus code ->
-                        Just (String.fromInt code)
-
-                    _ ->
-                        Just "Auth failed"
-            , status =
-                case model.status of
-                    LoggingInWithPrivateKeyAccounts accounts form ->
-                        LoginWithPrivateKeyAccounts accounts form
-
-                    LoggingInWithPrivateKey pk ->
-                        LoginWithPrivateKey pk
-
-                    LoggingInWithPin ->
-                        LoginWithPin
-
-                    _ ->
-                        Options
+signIn : Eos.Name -> Shared -> Maybe String -> SelectionSet (Maybe SignInResponse) RootMutation
+signIn accountName shared maybeInvitationId =
+    Cambiatus.Mutation.signIn
+        (\opts -> { opts | invitationId = OptionalArgument.fromMaybe maybeInvitationId })
+        { account = Eos.nameToString accountName
+        , password = shared.graphqlSecret
         }
-        |> UR.addCmd (Log.httpError httpError)
-        |> UR.addPort
-            { responseAddress = Ignored
-            , responseData = Encode.null
-            , data =
-                Encode.object
-                    [ ( "name", Encode.string "logout" )
-                    , ( "container", Encode.string "chat-manager" )
-                    ]
-            }
+        (Graphql.SelectionSet.succeed SignInResponse
+            |> with (Cambiatus.Object.Session.user Profile.selectionSet)
+            |> with Cambiatus.Object.Session.token
+        )
+
+
+authFailed : String -> Model -> UpdateResult
+authFailed error model =
+    { model
+        | status = WithoutPrivateKey
+        , error = Nothing
+        , pinModel =
+            initPinModel model.status
+                |> Pin.withProblem Pin.Pin error
+    }
+        |> UR.init
 
 
 jsAddressToMsg : List String -> Value -> Maybe Msg
 jsAddressToMsg addr val =
     case addr of
-        "SubmittedLoginPrivateKey" :: [] ->
-            decodeAccountNameOrStringError GotPrivateKeyLogin val
-
-        "ClickedPrivateKeyAccount" :: [] ->
-            decodeAccountNameOrStringError GotPrivateKeyLogin val
-
-        "SubmittedLoginPIN" :: [] ->
-            decodeAccountNameOrStringError GotPinLogin val
+        "SubmittedPin" :: [] ->
+            Decode.decodeValue
+                (Decode.oneOf
+                    [ Decode.succeed Tuple.pair
+                        |> DecodePipeline.required "accountName" Eos.nameDecoder
+                        |> DecodePipeline.required "privateKey" Eos.privateKeyDecoder
+                        |> Decode.map (Ok >> GotSubmittedPinResponse)
+                    , Decode.field "error" Decode.string
+                        |> Decode.map (Err >> GotSubmittedPinResponse)
+                    ]
+                )
+                val
+                |> Result.toMaybe
 
         _ ->
             Nothing
-
-
-decodeAccountNameOrStringError : (Result String ( Eos.Name, String ) -> Msg) -> Value -> Maybe Msg
-decodeAccountNameOrStringError toMsg value =
-    Decode.decodeValue
-        (Decode.oneOf
-            [ Decode.succeed Tuple.pair
-                |> Decode.required "accountName" Eos.nameDecoder
-                |> Decode.required "privateKey" Decode.string
-                |> Decode.map (Ok >> toMsg)
-            , Decode.field "accountNames" (Decode.list Eos.nameDecoder)
-                |> Decode.map GotMultipleAccountsLogin
-            , Decode.field "error" Decode.string
-                |> Decode.map (Err >> toMsg)
-            ]
-        )
-        value
-        |> Result.toMaybe
 
 
 msgToString : Msg -> List String
@@ -799,38 +318,14 @@ msgToString msg =
         Ignored ->
             [ "Ignored" ]
 
-        ClickedViewOptions ->
-            [ "ClickedViewOptions" ]
+        CompletedSignIn _ _ ->
+            [ "CompletedSignIn" ]
 
-        EnteredPrivateKey _ ->
-            [ "EnteredPrivateKey" ]
+        SubmittedPin _ ->
+            [ "SubmittedPin" ]
 
-        SubmittedLoginPrivateKey _ ->
-            [ "SubmittedLoginPrivateKey" ]
+        GotSubmittedPinResponse r ->
+            [ "GotSubmittedPinResponse", UR.resultToString r ]
 
-        GotMultipleAccountsLogin _ ->
-            [ "GotMultipleAccountsLogin" ]
-
-        ClickedPrivateKeyAccount _ _ ->
-            [ "ClickedPrivateKeyAccount" ]
-
-        GotPrivateKeyLogin r ->
-            [ "GotPrivateKeyLogin", UR.resultToString r ]
-
-        SubmittedLoginPIN ->
-            [ "SubmittedLoginPIN" ]
-
-        GotPinLogin r ->
-            [ "GotPinLogin", UR.resultToString r ]
-
-        CompletedLoadProfile _ _ r ->
-            [ "CompletedLoadProfile", UR.resultToString r ]
-
-        CompletedCreateProfile _ _ r ->
-            [ "CompletedCreateProfile", UR.resultToString r ]
-
-        EnteredPinDigit _ _ ->
-            [ "EnteredPinDigit" ]
-
-        TogglePinVisibility ->
-            [ "TogglePinVisibility" ]
+        GotPinMsg subMsg ->
+            "GotPinMsg" :: Pin.msgToString subMsg

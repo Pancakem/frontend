@@ -4,6 +4,8 @@
 
 module Cambiatus.InputObject exposing (..)
 
+import Cambiatus.Enum.ContactType
+import Cambiatus.Enum.Direction
 import Cambiatus.Enum.VerificationType
 import Cambiatus.Interface
 import Cambiatus.Object
@@ -18,7 +20,9 @@ import Graphql.SelectionSet exposing (SelectionSet)
 import Json.Decode as Decode
 
 
-buildActionsInput : (ActionsInputOptionalFields -> ActionsInputOptionalFields) -> ActionsInput
+buildActionsInput :
+    (ActionsInputOptionalFields -> ActionsInputOptionalFields)
+    -> ActionsInput
 buildActionsInput fillOptionals =
     let
         optionals =
@@ -54,7 +58,57 @@ encodeActionsInput input =
         [ ( "creator", Encode.string |> Encode.optional input.creator ), ( "isCompleted", Encode.bool |> Encode.optional input.isCompleted ), ( "validator", Encode.string |> Encode.optional input.validator ), ( "verificationType", Encode.enum Cambiatus.Enum.VerificationType.toString |> Encode.optional input.verificationType ) ]
 
 
-buildChecksInput : (ChecksInputOptionalFields -> ChecksInputOptionalFields) -> ChecksInput
+buildAddressUpdateInput :
+    AddressUpdateInputRequiredFields
+    -> (AddressUpdateInputOptionalFields -> AddressUpdateInputOptionalFields)
+    -> AddressUpdateInput
+buildAddressUpdateInput required fillOptionals =
+    let
+        optionals =
+            fillOptionals
+                { number = Absent }
+    in
+    { cityId = required.cityId, countryId = required.countryId, neighborhoodId = required.neighborhoodId, number = optionals.number, stateId = required.stateId, street = required.street, zip = required.zip }
+
+
+type alias AddressUpdateInputRequiredFields =
+    { cityId : Cambiatus.ScalarCodecs.Id
+    , countryId : Cambiatus.ScalarCodecs.Id
+    , neighborhoodId : Cambiatus.ScalarCodecs.Id
+    , stateId : Cambiatus.ScalarCodecs.Id
+    , street : String
+    , zip : String
+    }
+
+
+type alias AddressUpdateInputOptionalFields =
+    { number : OptionalArgument String }
+
+
+{-| Type for the AddressUpdateInput input object.
+-}
+type alias AddressUpdateInput =
+    { cityId : Cambiatus.ScalarCodecs.Id
+    , countryId : Cambiatus.ScalarCodecs.Id
+    , neighborhoodId : Cambiatus.ScalarCodecs.Id
+    , number : OptionalArgument String
+    , stateId : Cambiatus.ScalarCodecs.Id
+    , street : String
+    , zip : String
+    }
+
+
+{-| Encode a AddressUpdateInput into a value that can be used as an argument.
+-}
+encodeAddressUpdateInput : AddressUpdateInput -> Value
+encodeAddressUpdateInput input =
+    Encode.maybeObject
+        [ ( "cityId", (Cambiatus.ScalarCodecs.codecs |> Cambiatus.Scalar.unwrapEncoder .codecId) input.cityId |> Just ), ( "countryId", (Cambiatus.ScalarCodecs.codecs |> Cambiatus.Scalar.unwrapEncoder .codecId) input.countryId |> Just ), ( "neighborhoodId", (Cambiatus.ScalarCodecs.codecs |> Cambiatus.Scalar.unwrapEncoder .codecId) input.neighborhoodId |> Just ), ( "number", Encode.string |> Encode.optional input.number ), ( "stateId", (Cambiatus.ScalarCodecs.codecs |> Cambiatus.Scalar.unwrapEncoder .codecId) input.stateId |> Just ), ( "street", Encode.string input.street |> Just ), ( "zip", Encode.string input.zip |> Just ) ]
+
+
+buildChecksInput :
+    (ChecksInputOptionalFields -> ChecksInputOptionalFields)
+    -> ChecksInput
 buildChecksInput fillOptionals =
     let
         optionals =
@@ -82,7 +136,75 @@ encodeChecksInput input =
         [ ( "validator", Encode.string |> Encode.optional input.validator ) ]
 
 
-buildClaimInput : ClaimInputRequiredFields -> ClaimInput
+buildClaimAnalysisFilter :
+    (ClaimAnalysisFilterOptionalFields -> ClaimAnalysisFilterOptionalFields)
+    -> ClaimAnalysisFilter
+buildClaimAnalysisFilter fillOptionals =
+    let
+        optionals =
+            fillOptionals
+                { direction = Absent }
+    in
+    { direction = optionals.direction }
+
+
+type alias ClaimAnalysisFilterOptionalFields =
+    { direction : OptionalArgument Cambiatus.Enum.Direction.Direction }
+
+
+{-| Type for the ClaimAnalysisFilter input object.
+-}
+type alias ClaimAnalysisFilter =
+    { direction : OptionalArgument Cambiatus.Enum.Direction.Direction }
+
+
+{-| Encode a ClaimAnalysisFilter into a value that can be used as an argument.
+-}
+encodeClaimAnalysisFilter : ClaimAnalysisFilter -> Value
+encodeClaimAnalysisFilter input =
+    Encode.maybeObject
+        [ ( "direction", Encode.enum Cambiatus.Enum.Direction.toString |> Encode.optional input.direction ) ]
+
+
+buildClaimAnalysisHistoryFilter :
+    (ClaimAnalysisHistoryFilterOptionalFields -> ClaimAnalysisHistoryFilterOptionalFields)
+    -> ClaimAnalysisHistoryFilter
+buildClaimAnalysisHistoryFilter fillOptionals =
+    let
+        optionals =
+            fillOptionals
+                { claimer = Absent, direction = Absent, status = Absent }
+    in
+    { claimer = optionals.claimer, direction = optionals.direction, status = optionals.status }
+
+
+type alias ClaimAnalysisHistoryFilterOptionalFields =
+    { claimer : OptionalArgument String
+    , direction : OptionalArgument Cambiatus.Enum.Direction.Direction
+    , status : OptionalArgument String
+    }
+
+
+{-| Type for the ClaimAnalysisHistoryFilter input object.
+-}
+type alias ClaimAnalysisHistoryFilter =
+    { claimer : OptionalArgument String
+    , direction : OptionalArgument Cambiatus.Enum.Direction.Direction
+    , status : OptionalArgument String
+    }
+
+
+{-| Encode a ClaimAnalysisHistoryFilter into a value that can be used as an argument.
+-}
+encodeClaimAnalysisHistoryFilter : ClaimAnalysisHistoryFilter -> Value
+encodeClaimAnalysisHistoryFilter input =
+    Encode.maybeObject
+        [ ( "claimer", Encode.string |> Encode.optional input.claimer ), ( "direction", Encode.enum Cambiatus.Enum.Direction.toString |> Encode.optional input.direction ), ( "status", Encode.string |> Encode.optional input.status ) ]
+
+
+buildClaimInput :
+    ClaimInputRequiredFields
+    -> ClaimInput
 buildClaimInput required =
     { id = required.id }
 
@@ -105,69 +227,128 @@ encodeClaimInput input =
         [ ( "id", Encode.int input.id |> Just ) ]
 
 
-buildClaimsInput : (ClaimsInputOptionalFields -> ClaimsInputOptionalFields) -> ClaimsInput
-buildClaimsInput fillOptionals =
+buildCompleteObjectiveInput :
+    CompleteObjectiveInputRequiredFields
+    -> CompleteObjectiveInput
+buildCompleteObjectiveInput required =
+    { objectiveId = required.objectiveId }
+
+
+type alias CompleteObjectiveInputRequiredFields =
+    { objectiveId : Int }
+
+
+{-| Type for the CompleteObjectiveInput input object.
+-}
+type alias CompleteObjectiveInput =
+    { objectiveId : Int }
+
+
+{-| Encode a CompleteObjectiveInput into a value that can be used as an argument.
+-}
+encodeCompleteObjectiveInput : CompleteObjectiveInput -> Value
+encodeCompleteObjectiveInput input =
+    Encode.maybeObject
+        [ ( "objectiveId", Encode.int input.objectiveId |> Just ) ]
+
+
+buildContactInput :
+    (ContactInputOptionalFields -> ContactInputOptionalFields)
+    -> ContactInput
+buildContactInput fillOptionals =
     let
         optionals =
             fillOptionals
-                { claimer = Absent, symbol = Absent, validator = Absent }
+                { externalId = Absent, type_ = Absent }
     in
-    { claimer = optionals.claimer, symbol = optionals.symbol, validator = optionals.validator }
+    { externalId = optionals.externalId, type_ = optionals.type_ }
 
 
-type alias ClaimsInputOptionalFields =
-    { claimer : OptionalArgument String
-    , symbol : OptionalArgument String
-    , validator : OptionalArgument String
+type alias ContactInputOptionalFields =
+    { externalId : OptionalArgument String
+    , type_ : OptionalArgument Cambiatus.Enum.ContactType.ContactType
     }
 
 
-{-| Type for the ClaimsInput input object.
+{-| Type for the ContactInput input object.
 -}
-type alias ClaimsInput =
-    { claimer : OptionalArgument String
-    , symbol : OptionalArgument String
-    , validator : OptionalArgument String
+type alias ContactInput =
+    { externalId : OptionalArgument String
+    , type_ : OptionalArgument Cambiatus.Enum.ContactType.ContactType
     }
 
 
-{-| Encode a ClaimsInput into a value that can be used as an argument.
+{-| Encode a ContactInput into a value that can be used as an argument.
 -}
-encodeClaimsInput : ClaimsInput -> Value
-encodeClaimsInput input =
+encodeContactInput : ContactInput -> Value
+encodeContactInput input =
     Encode.maybeObject
-        [ ( "claimer", Encode.string |> Encode.optional input.claimer ), ( "symbol", Encode.string |> Encode.optional input.symbol ), ( "validator", Encode.string |> Encode.optional input.validator ) ]
+        [ ( "externalId", Encode.string |> Encode.optional input.externalId ), ( "type", Encode.enum Cambiatus.Enum.ContactType.toString |> Encode.optional input.type_ ) ]
 
 
-buildInviteInput : (InviteInputOptionalFields -> InviteInputOptionalFields) -> InviteInput
-buildInviteInput fillOptionals =
-    let
-        optionals =
-            fillOptionals
-                { id = Absent }
-    in
-    { id = optionals.id }
+buildCountryInput :
+    CountryInputRequiredFields
+    -> CountryInput
+buildCountryInput required =
+    { name = required.name }
 
 
-type alias InviteInputOptionalFields =
-    { id : OptionalArgument String }
+type alias CountryInputRequiredFields =
+    { name : String }
 
 
-{-| Type for the InviteInput input object.
+{-| Type for the CountryInput input object.
 -}
-type alias InviteInput =
-    { id : OptionalArgument String }
+type alias CountryInput =
+    { name : String }
 
 
-{-| Encode a InviteInput into a value that can be used as an argument.
+{-| Encode a CountryInput into a value that can be used as an argument.
 -}
-encodeInviteInput : InviteInput -> Value
-encodeInviteInput input =
+encodeCountryInput : CountryInput -> Value
+encodeCountryInput input =
     Encode.maybeObject
-        [ ( "id", Encode.string |> Encode.optional input.id ) ]
+        [ ( "name", Encode.string input.name |> Just ) ]
 
 
-buildNewCommunityInput : NewCommunityInputRequiredFields -> NewCommunityInput
+buildKycDataUpdateInput :
+    KycDataUpdateInputRequiredFields
+    -> KycDataUpdateInput
+buildKycDataUpdateInput required =
+    { countryId = required.countryId, document = required.document, documentType = required.documentType, phone = required.phone, userType = required.userType }
+
+
+type alias KycDataUpdateInputRequiredFields =
+    { countryId : Cambiatus.ScalarCodecs.Id
+    , document : String
+    , documentType : String
+    , phone : String
+    , userType : String
+    }
+
+
+{-| Type for the KycDataUpdateInput input object.
+-}
+type alias KycDataUpdateInput =
+    { countryId : Cambiatus.ScalarCodecs.Id
+    , document : String
+    , documentType : String
+    , phone : String
+    , userType : String
+    }
+
+
+{-| Encode a KycDataUpdateInput into a value that can be used as an argument.
+-}
+encodeKycDataUpdateInput : KycDataUpdateInput -> Value
+encodeKycDataUpdateInput input =
+    Encode.maybeObject
+        [ ( "countryId", (Cambiatus.ScalarCodecs.codecs |> Cambiatus.Scalar.unwrapEncoder .codecId) input.countryId |> Just ), ( "document", Encode.string input.document |> Just ), ( "documentType", Encode.string input.documentType |> Just ), ( "phone", Encode.string input.phone |> Just ), ( "userType", Encode.string input.userType |> Just ) ]
+
+
+buildNewCommunityInput :
+    NewCommunityInputRequiredFields
+    -> NewCommunityInput
 buildNewCommunityInput required =
     { symbol = required.symbol }
 
@@ -190,7 +371,9 @@ encodeNewCommunityInput input =
         [ ( "symbol", Encode.string input.symbol |> Just ) ]
 
 
-buildObjectiveInput : ObjectiveInputRequiredFields -> ObjectiveInput
+buildObjectiveInput :
+    ObjectiveInputRequiredFields
+    -> ObjectiveInput
 buildObjectiveInput required =
     { id = required.id }
 
@@ -213,87 +396,52 @@ encodeObjectiveInput input =
         [ ( "id", Encode.int input.id |> Just ) ]
 
 
-buildProfileInput : (ProfileInputOptionalFields -> ProfileInputOptionalFields) -> ProfileInput
-buildProfileInput fillOptionals =
+buildProductsFilterInput :
+    ProductsFilterInputRequiredFields
+    -> (ProductsFilterInputOptionalFields -> ProductsFilterInputOptionalFields)
+    -> ProductsFilterInput
+buildProductsFilterInput required fillOptionals =
     let
         optionals =
             fillOptionals
-                { account = Absent }
+                { inStock = Absent }
     in
-    { account = optionals.account }
+    { account = required.account, inStock = optionals.inStock }
 
 
-type alias ProfileInputOptionalFields =
-    { account : OptionalArgument String }
-
-
-{-| Type for the ProfileInput input object.
--}
-type alias ProfileInput =
-    { account : OptionalArgument String }
-
-
-{-| Encode a ProfileInput into a value that can be used as an argument.
--}
-encodeProfileInput : ProfileInput -> Value
-encodeProfileInput input =
-    Encode.maybeObject
-        [ ( "account", Encode.string |> Encode.optional input.account ) ]
-
-
-buildProfileUpdateInput : ProfileUpdateInputRequiredFields -> (ProfileUpdateInputOptionalFields -> ProfileUpdateInputOptionalFields) -> ProfileUpdateInput
-buildProfileUpdateInput required fillOptionals =
-    let
-        optionals =
-            fillOptionals
-                { avatar = Absent, bio = Absent, email = Absent, interests = Absent, location = Absent, name = Absent }
-    in
-    { account = required.account, avatar = optionals.avatar, bio = optionals.bio, email = optionals.email, interests = optionals.interests, location = optionals.location, name = optionals.name }
-
-
-type alias ProfileUpdateInputRequiredFields =
+type alias ProductsFilterInputRequiredFields =
     { account : String }
 
 
-type alias ProfileUpdateInputOptionalFields =
-    { avatar : OptionalArgument String
-    , bio : OptionalArgument String
-    , email : OptionalArgument String
-    , interests : OptionalArgument String
-    , location : OptionalArgument String
-    , name : OptionalArgument String
-    }
+type alias ProductsFilterInputOptionalFields =
+    { inStock : OptionalArgument Bool }
 
 
-{-| Type for the ProfileUpdateInput input object.
+{-| Type for the ProductsFilterInput input object.
 -}
-type alias ProfileUpdateInput =
+type alias ProductsFilterInput =
     { account : String
-    , avatar : OptionalArgument String
-    , bio : OptionalArgument String
-    , email : OptionalArgument String
-    , interests : OptionalArgument String
-    , location : OptionalArgument String
-    , name : OptionalArgument String
+    , inStock : OptionalArgument Bool
     }
 
 
-{-| Encode a ProfileUpdateInput into a value that can be used as an argument.
+{-| Encode a ProductsFilterInput into a value that can be used as an argument.
 -}
-encodeProfileUpdateInput : ProfileUpdateInput -> Value
-encodeProfileUpdateInput input =
+encodeProductsFilterInput : ProductsFilterInput -> Value
+encodeProductsFilterInput input =
     Encode.maybeObject
-        [ ( "account", Encode.string input.account |> Just ), ( "avatar", Encode.string |> Encode.optional input.avatar ), ( "bio", Encode.string |> Encode.optional input.bio ), ( "email", Encode.string |> Encode.optional input.email ), ( "interests", Encode.string |> Encode.optional input.interests ), ( "location", Encode.string |> Encode.optional input.location ), ( "name", Encode.string |> Encode.optional input.name ) ]
+        [ ( "account", Encode.string input.account |> Just ), ( "inStock", Encode.bool |> Encode.optional input.inStock ) ]
 
 
-buildPushSubscriptionInput : PushSubscriptionInputRequiredFields -> PushSubscriptionInput
+buildPushSubscriptionInput :
+    PushSubscriptionInputRequiredFields
+    -> PushSubscriptionInput
 buildPushSubscriptionInput required =
-    { account = required.account, authKey = required.authKey, endpoint = required.endpoint, pKey = required.pKey }
+    { authKey = required.authKey, endpoint = required.endpoint, pKey = required.pKey }
 
 
 type alias PushSubscriptionInputRequiredFields =
-    { account : String
-    , authKey : String
+    { authKey : String
     , endpoint : String
     , pKey : String
     }
@@ -302,8 +450,7 @@ type alias PushSubscriptionInputRequiredFields =
 {-| Type for the PushSubscriptionInput input object.
 -}
 type alias PushSubscriptionInput =
-    { account : String
-    , authKey : String
+    { authKey : String
     , endpoint : String
     , pKey : String
     }
@@ -314,10 +461,12 @@ type alias PushSubscriptionInput =
 encodePushSubscriptionInput : PushSubscriptionInput -> Value
 encodePushSubscriptionInput input =
     Encode.maybeObject
-        [ ( "account", Encode.string input.account |> Just ), ( "authKey", Encode.string input.authKey |> Just ), ( "endpoint", Encode.string input.endpoint |> Just ), ( "pKey", Encode.string input.pKey |> Just ) ]
+        [ ( "authKey", Encode.string input.authKey |> Just ), ( "endpoint", Encode.string input.endpoint |> Just ), ( "pKey", Encode.string input.pKey |> Just ) ]
 
 
-buildReadNotificationInput : ReadNotificationInputRequiredFields -> ReadNotificationInput
+buildReadNotificationInput :
+    ReadNotificationInputRequiredFields
+    -> ReadNotificationInput
 buildReadNotificationInput required =
     { id = required.id }
 
@@ -340,87 +489,40 @@ encodeReadNotificationInput input =
         [ ( "id", Encode.int input.id |> Just ) ]
 
 
-buildSaleInput : SaleInputRequiredFields -> SaleInput
-buildSaleInput required =
-    { id = required.id }
+buildTransferSucceedInput :
+    TransferSucceedInputRequiredFields
+    -> TransferSucceedInput
+buildTransferSucceedInput required =
+    { from = required.from, symbol = required.symbol, to = required.to }
 
 
-type alias SaleInputRequiredFields =
-    { id : Int }
-
-
-{-| Type for the SaleInput input object.
--}
-type alias SaleInput =
-    { id : Int }
-
-
-{-| Encode a SaleInput into a value that can be used as an argument.
--}
-encodeSaleInput : SaleInput -> Value
-encodeSaleInput input =
-    Encode.maybeObject
-        [ ( "id", Encode.int input.id |> Just ) ]
-
-
-buildSalesInput : (SalesInputOptionalFields -> SalesInputOptionalFields) -> SalesInput
-buildSalesInput fillOptionals =
-    let
-        optionals =
-            fillOptionals
-                { account = Absent, all = Absent, communities = Absent }
-    in
-    { account = optionals.account, all = optionals.all, communities = optionals.communities }
-
-
-type alias SalesInputOptionalFields =
-    { account : OptionalArgument String
-    , all : OptionalArgument String
-    , communities : OptionalArgument String
+type alias TransferSucceedInputRequiredFields =
+    { from : String
+    , symbol : String
+    , to : String
     }
 
 
-{-| Type for the SalesInput input object.
+{-| Type for the TransferSucceedInput input object.
 -}
-type alias SalesInput =
-    { account : OptionalArgument String
-    , all : OptionalArgument String
-    , communities : OptionalArgument String
+type alias TransferSucceedInput =
+    { from : String
+    , symbol : String
+    , to : String
     }
 
 
-{-| Encode a SalesInput into a value that can be used as an argument.
+{-| Encode a TransferSucceedInput into a value that can be used as an argument.
 -}
-encodeSalesInput : SalesInput -> Value
-encodeSalesInput input =
+encodeTransferSucceedInput : TransferSucceedInput -> Value
+encodeTransferSucceedInput input =
     Encode.maybeObject
-        [ ( "account", Encode.string |> Encode.optional input.account ), ( "all", Encode.string |> Encode.optional input.all ), ( "communities", Encode.string |> Encode.optional input.communities ) ]
+        [ ( "from", Encode.string input.from |> Just ), ( "symbol", Encode.string input.symbol |> Just ), ( "to", Encode.string input.to |> Just ) ]
 
 
-buildTransferInput : TransferInputRequiredFields -> TransferInput
-buildTransferInput required =
-    { id = required.id }
-
-
-type alias TransferInputRequiredFields =
-    { id : Int }
-
-
-{-| Type for the TransferInput input object.
--}
-type alias TransferInput =
-    { id : Int }
-
-
-{-| Encode a TransferInput into a value that can be used as an argument.
--}
-encodeTransferInput : TransferInput -> Value
-encodeTransferInput input =
-    Encode.maybeObject
-        [ ( "id", Encode.int input.id |> Just ) ]
-
-
-buildUnreadNotificationsSubscriptionInput : UnreadNotificationsSubscriptionInputRequiredFields -> UnreadNotificationsSubscriptionInput
+buildUnreadNotificationsSubscriptionInput :
+    UnreadNotificationsSubscriptionInputRequiredFields
+    -> UnreadNotificationsSubscriptionInput
 buildUnreadNotificationsSubscriptionInput required =
     { account = required.account }
 
@@ -441,3 +543,47 @@ encodeUnreadNotificationsSubscriptionInput : UnreadNotificationsSubscriptionInpu
 encodeUnreadNotificationsSubscriptionInput input =
     Encode.maybeObject
         [ ( "account", Encode.string input.account |> Just ) ]
+
+
+buildUserUpdateInput :
+    (UserUpdateInputOptionalFields -> UserUpdateInputOptionalFields)
+    -> UserUpdateInput
+buildUserUpdateInput fillOptionals =
+    let
+        optionals =
+            fillOptionals
+                { avatar = Absent, bio = Absent, contacts = Absent, email = Absent, interests = Absent, location = Absent, name = Absent }
+    in
+    { avatar = optionals.avatar, bio = optionals.bio, contacts = optionals.contacts, email = optionals.email, interests = optionals.interests, location = optionals.location, name = optionals.name }
+
+
+type alias UserUpdateInputOptionalFields =
+    { avatar : OptionalArgument String
+    , bio : OptionalArgument String
+    , contacts : OptionalArgument (List ContactInput)
+    , email : OptionalArgument String
+    , interests : OptionalArgument String
+    , location : OptionalArgument String
+    , name : OptionalArgument String
+    }
+
+
+{-| Type for the UserUpdateInput input object.
+-}
+type alias UserUpdateInput =
+    { avatar : OptionalArgument String
+    , bio : OptionalArgument String
+    , contacts : OptionalArgument (List ContactInput)
+    , email : OptionalArgument String
+    , interests : OptionalArgument String
+    , location : OptionalArgument String
+    , name : OptionalArgument String
+    }
+
+
+{-| Encode a UserUpdateInput into a value that can be used as an argument.
+-}
+encodeUserUpdateInput : UserUpdateInput -> Value
+encodeUserUpdateInput input =
+    Encode.maybeObject
+        [ ( "avatar", Encode.string |> Encode.optional input.avatar ), ( "bio", Encode.string |> Encode.optional input.bio ), ( "contacts", (encodeContactInput |> Encode.list) |> Encode.optional input.contacts ), ( "email", Encode.string |> Encode.optional input.email ), ( "interests", Encode.string |> Encode.optional input.interests ), ( "location", Encode.string |> Encode.optional input.location ), ( "name", Encode.string |> Encode.optional input.name ) ]

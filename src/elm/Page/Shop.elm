@@ -1,35 +1,35 @@
-module Page.Shop exposing (Model, Msg, init, jsAddressToMsg, msgToString, subscriptions, update, view)
+module Page.Shop exposing
+    ( Model
+    , Msg
+    , init
+    , jsAddressToMsg
+    , msgToString
+    , receiveBroadcast
+    , update
+    , view
+    )
 
 import Api
 import Api.Graphql
-import Asset.Icon as Icon
-import Avatar
-import Browser.Dom as Dom
+import Array
 import Community exposing (Balance)
-import Eos as Eos exposing (Symbol)
-import Eos.Account as Eos
+import Eos
 import Graphql.Http
-import Html exposing (..)
-import Html.Attributes exposing (..)
-import Html.Events exposing (on, onClick, onInput, onSubmit, targetValue)
+import Html exposing (Html, a, button, div, img, p, text)
+import Html.Attributes exposing (class, classList, src, value)
+import Html.Events exposing (on, onClick)
 import Html.Lazy as Lazy
 import Http
 import I18Next exposing (t)
-import Icons
-import Json.Decode as Decode exposing (Decoder, Value)
-import Json.Encode as Encode
+import Json.Decode exposing (Value)
 import List.Extra as LE
-import Log
-import Page exposing (Session(..), viewMenuFilter, viewMenuFilterButton, viewMenuFilterTabButton, viewMenuTab)
+import Page exposing (Session(..))
 import Profile exposing (viewProfileNameTag)
-import Route exposing (Route)
-import Session.Guest as Guest
+import Profile.Summary
+import RemoteData exposing (RemoteData)
+import Route
 import Session.LoggedIn as LoggedIn exposing (External(..))
-import Session.Shared exposing (Shared)
-import Shop exposing (Filter, Sale, decodeTargetValueToFilter)
-import Task
-import Time exposing (Posix)
-import Transfer exposing (Transfer)
+import Shop exposing (Filter, Product)
 import UpdateResult as UR
 
 
@@ -41,28 +41,14 @@ init : LoggedIn.Model -> Filter -> ( Model, Cmd Msg )
 init loggedIn filter =
     let
         model =
-            initModel loggedIn filter
+            initModel filter
     in
     ( model
     , Cmd.batch
-        [ Api.Graphql.query loggedIn.shared
-            (Shop.salesQuery filter loggedIn.accountName)
-            CompletedSalesLoad
+        [ LoggedIn.maybeInitWith CompletedLoadCommunity .selectedCommunity loggedIn
         , Api.getBalances loggedIn.shared loggedIn.accountName CompletedLoadBalances
-        , Task.perform GotTime Time.now
-        , Dom.focus "main-content"
-            |> Task.attempt (\_ -> Ignored)
         ]
     )
-
-
-
--- SUBSCRIPTIONS
-
-
-subscriptions : Model -> Sub Msg
-subscriptions model =
-    Sub.none
 
 
 
@@ -70,17 +56,15 @@ subscriptions model =
 
 
 type alias Model =
-    { date : Maybe Posix
-    , cards : Status
+    { cards : Status
     , balances : List Balance
     , filter : Filter
     }
 
 
-initModel : LoggedIn.Model -> Filter -> Model
-initModel loggedIn filter =
-    { date = Nothing
-    , cards = Loading
+initModel : Filter -> Model
+initModel filter =
+    { cards = Loading
     , balances = []
     , filter = filter
     }
@@ -89,23 +73,23 @@ initModel loggedIn filter =
 type Status
     = Loading
     | Loaded (List Card)
-    | LoadingFailed (Graphql.Http.Error (List Sale))
+    | LoadingFailed (Graphql.Http.Error (List Product))
 
 
 type alias Card =
-    { sale : Sale
-    , state : CardState
-    , rate : Maybe Int
+    { product : Product
     , form : SaleTransferForm
+    , profileSummary : Profile.Summary.Model
+    , isAvailable : Bool
     }
 
 
-cardFromSale : Sale -> Card
-cardFromSale sale =
-    { sale = sale
-    , state = ViewingCard
-    , rate = Nothing
+cardFromSale : Product -> Card
+cardFromSale p =
+    { product = p
     , form = initSaleFrom
+    , profileSummary = Profile.Summary.init False
+    , isAvailable = p.units > 0 || not p.trackStock
     }
 
 
@@ -128,65 +112,94 @@ initSaleFrom =
 
 type Validation
     = Valid
-    | Invalid ValidationError
-
-
-type ValidationError
-    = UnitsEmpty
-    | UnitTooLow
-    | UnitTooHigh
-    | UnitNotOnlyNumbers
-    | MemoEmpty
-    | MemoTooLong
-
-
-type CardState
-    = ViewingCard
 
 
 
 -- VIEW
 
 
-view : LoggedIn.Model -> Model -> Html Msg
+view : LoggedIn.Model -> Model -> { title : String, content : Html Msg }
 view loggedIn model =
-    case model.cards of
-        Loading ->
-            div []
-                [ Lazy.lazy viewHeader loggedIn
-                , div [ class "container mx-auto px-4" ]
-                    [ Page.fullPageLoading ]
-                ]
+    let
+        { t } =
+            loggedIn.shared.translators
 
-        LoadingFailed e ->
-            Page.fullPageGraphQLError (t loggedIn.shared.translations "shop.title") e
+        selectedCommunityName =
+            case loggedIn.selectedCommunity of
+                RemoteData.Success community ->
+                    community.name
 
-        Loaded cards ->
-            div []
-                [ Lazy.lazy viewHeader loggedIn
-                , div [ class "container mx-auto justify-center px-4" ]
-                    [ viewShopFilter loggedIn model.filter
-                    , Lazy.lazy3 viewGrid loggedIn cards model
-                    ]
-                ]
+                _ ->
+                    ""
+
+        title =
+            selectedCommunityName
+                ++ " "
+                ++ t "shop.title"
+
+        content =
+            case model.cards of
+                Loading ->
+                    div []
+                        [ Lazy.lazy viewHeader loggedIn
+                        , div [ class "container mx-auto px-4" ]
+                            [ Page.fullPageLoading loggedIn.shared ]
+                        ]
+
+                LoadingFailed e ->
+                    Page.fullPageGraphQLError (t "shop.title") e
+
+                Loaded cards ->
+                    div []
+                        [ Lazy.lazy viewHeader loggedIn
+                        , div [ class "container mx-auto justify-center px-4" ]
+                            [ viewShopFilter loggedIn model.filter
+                            , Lazy.lazy3 viewGrid loggedIn cards model
+                            ]
+                        ]
+    in
+    { title = title
+    , content =
+        case RemoteData.map .hasShop loggedIn.selectedCommunity of
+            RemoteData.Success True ->
+                content
+
+            RemoteData.Success False ->
+                Page.fullPageNotFound
+                    (t "error.pageNotFound")
+                    (t "shop.disabled.description")
+
+            RemoteData.Loading ->
+                Page.fullPageLoading loggedIn.shared
+
+            RemoteData.NotAsked ->
+                Page.fullPageLoading loggedIn.shared
+
+            RemoteData.Failure e ->
+                Page.fullPageGraphQLError (t "community.error_loading") e
+    }
 
 
 viewHeader : LoggedIn.Model -> Html Msg
 viewHeader loggedIn =
-    div [ class "w-full flex flex-wrap relative bg-indigo-500 p-4 lg:container lg:mx-auto lg:py-12" ]
+    let
+        t =
+            loggedIn.shared.translators.t
+    in
+    div [ class "w-full flex flex-wrap relative bg-indigo-500 p-4 lg:mx-auto lg:py-12" ]
         [ div [ class "flex w-full container mx-auto" ]
             [ div [ class "w-1/2" ]
                 [ p [ class "text-white w-full text-xl font-medium mb-4 mx-8 text-xs font-light mb-2 uppercase" ]
-                    [ text (t loggedIn.shared.translations "shop.title") ]
+                    [ text (t "shop.title") ]
                 , p [ class "hidden lg:visible lg:flex text-white text-3xl mx-8 mb-4 font-medium" ]
-                    [ text (t loggedIn.shared.translations "shop.subtitle") ]
+                    [ text (t "shop.subtitle") ]
                 , p [ class "hidden lg:visible lg:flex text-white mx-8 font-light text-sm" ]
-                    [ text (t loggedIn.shared.translations "shop.description") ]
+                    [ text (t "shop.description") ]
                 , a
                     [ Route.href Route.NewSale
                     , class "button button-primary button-sm w-full lg:w-64 lg:mx-8 lg:mt-6 lg:button-medium font-medium"
                     ]
-                    [ text (t loggedIn.shared.translations "shop.create_offer") ]
+                    [ text (t "shop.create_offer") ]
                 ]
             , div [ class "hidden lg:visible lg:flex w-1/2 justify-center absolute right-0 bottom-0" ]
                 [ img [ src "/images/shop.svg" ] []
@@ -198,10 +211,8 @@ viewHeader loggedIn =
 viewShopFilter : LoggedIn.Model -> Filter -> Html Msg
 viewShopFilter loggedIn filter =
     let
-        translations =
-            ( t loggedIn.shared.translations "shop.all_offers"
-            , t loggedIn.shared.translations "shop.my_offers"
-            )
+        t =
+            loggedIn.shared.translators.t
 
         buttonClass =
             "w-1/2 lg:w-56 border border-purple-500 first:rounded-l last:rounded-r px-12 py-2 text-sm font-light text-gray"
@@ -210,17 +221,17 @@ viewShopFilter loggedIn filter =
         [ button
             [ class buttonClass
             , classList [ ( "bg-purple-500 text-white", filter == Shop.All ) ]
-            , value (t loggedIn.shared.translations "shop.all_offers")
+            , value (t "shop.all_offers")
             , onClick (ClickedFilter Shop.All)
             ]
-            [ text (t loggedIn.shared.translations "shop.all_offers") ]
+            [ text (t "shop.all_offers") ]
         , button
             [ class buttonClass
             , classList [ ( "bg-purple-500 text-white", filter == Shop.UserSales ) ]
-            , value (t loggedIn.shared.translations "shop.my_offers")
+            , value (t "shop.my_offers")
             , onClick (ClickedFilter Shop.UserSales)
             ]
-            [ text (t loggedIn.shared.translations "shop.my_offers") ]
+            [ text (t "shop.my_offers") ]
         ]
 
 
@@ -231,31 +242,38 @@ viewShopFilter loggedIn filter =
 viewGrid : LoggedIn.Model -> List Card -> Model -> Html Msg
 viewGrid loggedIn cards model =
     let
-        v_ viewFn card =
-            viewFn model loggedIn card
-    in
-    div [ class "flex flex-wrap -mx-2" ]
-        (List.map
-            (\card ->
-                case card.state of
-                    ViewingCard ->
-                        v_ viewCard card
-            )
+        outOfStockCards =
             cards
-        )
+                |> List.filter (.isAvailable >> not)
+
+        availableCards =
+            cards
+                |> List.filter .isAvailable
+    in
+    div []
+        [ div [ class "flex flex-wrap -mx-2" ]
+            (List.indexedMap (viewCard model loggedIn) availableCards)
+        , if List.length outOfStockCards > 0 then
+            div []
+                [ p [ class "ml-2 w-full border-b-2 pb-2 border-gray-300 mb-4 text-2xl capitalize" ]
+                    [ text <| loggedIn.shared.translators.t "shop.out_of_stock" ]
+                , div [ class "flex flex-wrap -mx-2" ]
+                    (List.indexedMap (viewCard model loggedIn) outOfStockCards)
+                ]
+
+          else
+            text ""
+        ]
 
 
-viewCard : Model -> LoggedIn.Model -> Card -> Html Msg
-viewCard model ({ shared } as loggedIn) card =
+viewCard : Model -> LoggedIn.Model -> Int -> Card -> Html Msg
+viewCard model ({ shared } as loggedIn) index card =
     let
         image =
-            Maybe.withDefault "" card.sale.image
-
-        imageUrl =
-            shared.endpoints.ipfs ++ "/" ++ image
+            Maybe.withDefault "" card.product.image
 
         maybeBal =
-            LE.find (\bal -> bal.asset.symbol == card.sale.symbol) model.balances
+            LE.find (\bal -> bal.asset.symbol == card.product.symbol) model.balances
 
         symbolBalance =
             case maybeBal of
@@ -266,41 +284,46 @@ viewCard model ({ shared } as loggedIn) card =
                     0.0
 
         currBalance =
-            String.fromFloat symbolBalance ++ " " ++ Eos.symbolToString card.sale.symbol
+            String.fromFloat symbolBalance ++ " " ++ Eos.symbolToSymbolCodeString card.product.symbol
 
-        tr r_id replaces =
-            I18Next.tr shared.translations I18Next.Curly r_id replaces
+        tr rId replaces =
+            shared.translators.tr rId replaces
 
         title =
-            if String.length card.sale.title > 17 then
-                String.slice 0 17 card.sale.title ++ " ..."
+            if String.length card.product.title > 17 then
+                String.slice 0 17 card.product.title ++ " ..."
 
             else
-                card.sale.title
+                card.product.title
     in
     a
-        [ class "w-full sm:w-full md:w-1/2 lg:w-1/3 xl:w-1/4 px-2 mb-6"
-        , Route.href (Route.ViewSale (String.fromInt card.sale.id))
+        [ class "w-full md:w-1/2 lg:w-1/3 xl:w-1/4 px-2 mb-6"
+        , Route.href (Route.ViewSale (String.fromInt card.product.id))
         ]
         [ div [ class "md:hidden rounded-lg bg-white h-32 flex" ]
             [ div [ class "w-1/4" ]
-                [ img [ class "rounded-l-lg object-cover h-32 w-full", src imageUrl ] []
+                [ img
+                    [ class "rounded-l-lg object-cover h-32 w-full"
+                    , src image
+                    , on "error" (Json.Decode.succeed (OnImageError index))
+                    ]
+                    []
                 ]
             , div [ class "px-4 pb-2 flex flex-wrap" ]
-                [ p [ class "font-medium pt-2 w-full" ] [ text card.sale.title ]
-                , viewProfileNameTag loggedIn.accountName card.sale.creator shared.translations
+                [ p [ class "font-medium pt-2 w-full" ] [ text card.product.title ]
+                , viewProfileNameTag shared loggedIn.accountName card.product.creator
                 , div [ class "h-16 w-full flex flex-wrap items-end" ]
-                    [ if card.sale.units == 0 && card.sale.trackStock then
+                    [ if card.product.units == 0 && card.product.trackStock then
                         div [ class "w-full" ]
                             [ p [ class "text-3xl text-red" ]
-                                [ text (t shared.translations "shop.out_of_stock")
+                                [ text (shared.translators.t "shop.out_of_stock")
                                 ]
                             ]
 
                       else
                         div [ class "flex flex-none w-full items-center" ]
-                            [ p [ class "text-green text-2xl font-medium" ] [ text (String.fromFloat card.sale.price) ]
-                            , div [ class "uppercase text-xs ml-2 font-thin font-sans text-green" ] [ text (Eos.symbolToString card.sale.symbol) ]
+                            [ p [ class "text-green text-2xl font-medium" ] [ text (String.fromFloat card.product.price) ]
+                            , div [ class "uppercase text-xs ml-2 font-extralight font-sans text-green" ] [ text (Eos.symbolToSymbolCodeString card.product.symbol) ]
                             ]
                     , div [ class "w-full h-4" ]
                         [ div [ class "bg-gray-100 absolute uppercase text-xs px-2" ]
@@ -310,33 +333,29 @@ viewCard model ({ shared } as loggedIn) card =
                 ]
             ]
         , div
-            [ class "hidden md:visible md:flex md:flex-wrap rounded-lg hover:shadow-lg bg-white overflow-hidden"
+            [ class "hidden md:visible md:flex md:flex-wrap rounded-lg hover:shadow-lg bg-white"
             ]
-            [ div [ class "w-full relative bg-gray-500" ]
-                [ img [ class "w-full h-48 object-cover", src imageUrl ] []
+            [ div [ class "w-full relative bg-gray-500 rounded-t-lg" ]
+                [ img [ class "w-full h-48 object-cover rounded-t-lg", src image ] []
                 , div [ class "absolute right-1 bottom-1 " ]
-                    [ Profile.view shared.endpoints.ipfs loggedIn.accountName shared.translations card.sale.creator ]
+                    [ Profile.Summary.view loggedIn.shared loggedIn.accountName card.product.creator card.profileSummary
+                        |> Html.map (GotProfileSummaryMsg index card.isAvailable)
+                    ]
                 ]
             , div [ class "w-full px-6 pt-4" ]
                 [ p [ class "text-xl" ] [ text title ]
                 ]
-            , div [ class "flex flex-none items-center pt-3 px-6 pb-4" ]
-                [ Icons.thumbUp "text-indigo-500"
-                , p [ class "pl-2 pr-6 text-sm" ] [ text "0" ]
-                , Icons.thumbDown ""
-                , p [ class "pl-2 pr-6 text-sm" ] [ text "0" ]
-                ]
-            , if card.sale.units == 0 && card.sale.trackStock then
-                div [ class "border-t border-gray-300 flex flex-none w-full px-6 pb-2" ]
+            , if card.product.units == 0 && card.product.trackStock then
+                div [ class "flex flex-none w-full px-6 pb-2" ]
                     [ p [ class "text-3xl text-red" ]
-                        [ text (t loggedIn.shared.translations "shop.out_of_stock")
+                        [ text (loggedIn.shared.translators.t "shop.out_of_stock")
                         ]
                     ]
 
               else
-                div [ class "border-t border-gray-300 flex flex-none w-full px-6 pb-2" ]
-                    [ p [ class "text-green text-3xl" ] [ text (String.fromFloat card.sale.price) ]
-                    , div [ class "uppercase text-xs font-thin mt-3 ml-2 font-sans text-green" ] [ text (Eos.symbolToString card.sale.symbol) ]
+                div [ class "flex flex-none w-full px-6 pb-2" ]
+                    [ p [ class "text-green text-3xl" ] [ text (String.fromFloat card.product.price) ]
+                    , div [ class "uppercase text-xs font-extralight mt-3 ml-2 font-sans text-green" ] [ text (Eos.symbolToSymbolCodeString card.product.symbol) ]
                     ]
             , div [ class "px-6 pb-6" ]
                 [ div [ class "bg-gray-200 flex items-center justify-left text-xs px-4" ]
@@ -344,16 +363,6 @@ viewCard model ({ shared } as loggedIn) card =
                 ]
             ]
         ]
-
-
-getIpfsUrl : Session -> String
-getIpfsUrl session =
-    case session of
-        Guest s ->
-            s.shared.endpoints.ipfs
-
-        LoggedIn s ->
-            s.shared.endpoints.ipfs
 
 
 
@@ -365,125 +374,39 @@ type alias UpdateResult =
 
 
 type Msg
-    = Ignored
-    | GotTime Posix
-    | CompletedSalesLoad (Result (Graphql.Http.Error (List Sale)) (List Sale))
-    | ClickedSendTransfer Card Int
-    | ClickedMessages Int Eos.Name
+    = CompletedSalesLoad (RemoteData (Graphql.Http.Error (List Product)) (List Product))
+    | CompletedLoadCommunity Community.Model
     | ClickedFilter Filter
     | TransferSuccess Int
     | CompletedLoadBalances (Result Http.Error (List Balance))
+    | OnImageError Int
+    | GotProfileSummaryMsg Int Bool Profile.Summary.Msg
 
 
 update : Msg -> Model -> LoggedIn.Model -> UpdateResult
 update msg model loggedIn =
     case msg of
-        Ignored ->
-            UR.init model
-
-        GotTime date ->
-            UR.init { model | date = Just date }
-
-        CompletedSalesLoad (Ok sales) ->
+        CompletedSalesLoad (RemoteData.Success sales) ->
             UR.init { model | cards = Loaded (List.map cardFromSale sales) }
 
-        CompletedSalesLoad (Err err) ->
+        CompletedSalesLoad (RemoteData.Failure err) ->
             UR.init { model | cards = LoadingFailed err }
                 |> UR.logGraphqlError msg err
 
-        ClickedSendTransfer card cardIndex ->
-            let
-                newForm =
-                    validateForm card.sale card.form
-            in
-            if isFormValid newForm then
-                case LoggedIn.isAuth loggedIn of
-                    True ->
-                        let
-                            authorization =
-                                { actor = loggedIn.accountName
-                                , permissionName = Eos.samplePermission
-                                }
+        CompletedSalesLoad _ ->
+            UR.init model
 
-                            wantedUnits =
-                                case String.toInt card.form.unit of
-                                    Just quantityInt ->
-                                        quantityInt
-
-                                    -- TODO sort sales without units
-                                    Nothing ->
-                                        1
-
-                            tAmount =
-                                card.sale.price * toFloat wantedUnits
-
-                            quantity =
-                                { amount = tAmount
-                                , symbol = card.sale.symbol
-                                }
-
-                            from =
-                                loggedIn.accountName
-
-                            to =
-                                card.sale.creatorId
-                        in
-                        UR.init model
-                            |> UR.addPort
-                                { responseAddress = TransferSuccess cardIndex
-                                , responseData = Encode.null
-                                , data =
-                                    Eos.encodeTransaction
-                                        { actions =
-                                            [ { accountName = "bes.token"
-                                              , name = "transfer"
-                                              , authorization = authorization
-                                              , data =
-                                                    { from = from
-                                                    , to = to
-                                                    , value = quantity
-                                                    , memo = card.form.memo
-                                                    }
-                                                        |> Transfer.encodeEosActionData
-                                              }
-                                            , { accountName = "bes.cmm"
-                                              , name = "transfersale"
-                                              , authorization = authorization
-                                              , data =
-                                                    { id = card.sale.id
-                                                    , from = from
-                                                    , to = to
-                                                    , quantity = quantity
-                                                    , units = wantedUnits
-                                                    }
-                                                        |> Shop.encodeTransferSale
-                                              }
-                                            ]
-                                        }
-                                }
-
-                    False ->
-                        UR.init model
-                            |> UR.addExt (Just (ClickedSendTransfer card cardIndex) |> RequiredAuthentication)
-
-            else
-                UR.init model
+        CompletedLoadCommunity community ->
+            UR.init model
+                |> UR.addCmd
+                    (Api.Graphql.query loggedIn.shared
+                        (Just loggedIn.authToken)
+                        (Shop.productsQuery model.filter loggedIn.accountName community.symbol)
+                        CompletedSalesLoad
+                    )
 
         TransferSuccess index ->
-            updateCard msg index (\card -> ( { card | state = ViewingCard }, [] )) (UR.init model)
-                |> UR.addExt UpdateBalances
-
-        ClickedMessages cardIndex creatorId ->
-            UR.init model
-                |> UR.addPort
-                    { responseAddress = ClickedMessages cardIndex creatorId
-                    , responseData = Encode.null
-                    , data =
-                        Encode.object
-                            [ ( "name", Encode.string "openChat" )
-                            , ( "username", Encode.string (Eos.nameToString creatorId) )
-                            ]
-                    }
+            updateCard msg index (\card -> ( card, [] )) (UR.init model)
 
         ClickedFilter filter ->
             let
@@ -506,10 +429,67 @@ update msg model loggedIn =
                     model
                         |> UR.init
 
+        OnImageError index ->
+            case model.cards of
+                Loaded cards ->
+                    let
+                        cardArray =
+                            Array.fromList cards
+                    in
+                    case cards |> Array.fromList |> Array.get index of
+                        Just card ->
+                            let
+                                oldSale =
+                                    card.product
 
-updateCardState : Msg -> Int -> CardState -> UpdateResult -> UpdateResult
-updateCardState msg cardIndex newState uResult =
-    updateCard msg cardIndex (\card -> ( { card | state = newState }, [] )) uResult
+                                icon =
+                                    "/icons/shop-placeholder" ++ (index |> modBy 3 |> String.fromInt) ++ ".svg"
+
+                                newSale =
+                                    { oldSale | image = Just icon }
+
+                                newCard =
+                                    { card | product = newSale }
+
+                                newList =
+                                    Array.set index newCard cardArray
+                            in
+                            { model | cards = Loaded (Array.toList newList) } |> UR.init
+
+                        Nothing ->
+                            UR.logImpossible msg [ "cardOutOfIndex" ] (UR.init model)
+
+                _ ->
+                    model |> UR.init
+
+        GotProfileSummaryMsg index isAvailable subMsg ->
+            case model.cards of
+                Loaded cards ->
+                    let
+                        targetCard =
+                            cards
+                                |> List.filter (\card -> isAvailable == card.isAvailable)
+                                |> LE.getAt index
+
+                        updatedCards =
+                            case targetCard of
+                                Just card ->
+                                    let
+                                        updatedSummary =
+                                            Profile.Summary.update subMsg card.profileSummary
+                                    in
+                                    LE.updateIf (.product >> .id >> (==) card.product.id)
+                                        (\c -> { c | profileSummary = updatedSummary })
+                                        cards
+
+                                Nothing ->
+                                    cards
+                    in
+                    { model | cards = Loaded updatedCards }
+                        |> UR.init
+
+                _ ->
+                    UR.init model
 
 
 updateCard : Msg -> Int -> (Card -> ( Card, List (UpdateResult -> UpdateResult) )) -> UpdateResult -> UpdateResult
@@ -540,60 +520,22 @@ updateCard msg cardIndex transform ({ model } as uResult) =
             UR.logImpossible msg [] uResult
 
 
-validateForm : Sale -> SaleTransferForm -> SaleTransferForm
-validateForm sale form =
-    let
-        unitValidation : Validation
-        unitValidation =
-            if form.unit == "" then
-                Invalid UnitsEmpty
-
-            else
-                case String.toInt form.unit of
-                    Just units ->
-                        if units > sale.units then
-                            Invalid UnitTooHigh
-
-                        else if units <= 0 then
-                            Invalid UnitTooLow
-
-                        else
-                            Valid
-
-                    Nothing ->
-                        Invalid UnitNotOnlyNumbers
-
-        memoValidation =
-            if form.memo == "" then
-                Invalid MemoEmpty
-
-            else if String.length form.memo > 256 then
-                Invalid MemoTooLong
-
-            else
-                Valid
-    in
-    { form
-        | unitValidation = unitValidation
-        , memoValidation = memoValidation
-    }
-
-
-isFormValid : SaleTransferForm -> Bool
-isFormValid form =
-    form.unitValidation == Valid && form.memoValidation == Valid
-
-
 jsAddressToMsg : List String -> Value -> Maybe Msg
 jsAddressToMsg addr _ =
     case addr of
         "TransferSuccess" :: [ index ] ->
-            case String.toInt index of
-                Just x ->
-                    Just (TransferSuccess x)
+            String.toInt index
+                |> Maybe.map TransferSuccess
 
-                Nothing ->
-                    Nothing
+        _ ->
+            Nothing
+
+
+receiveBroadcast : LoggedIn.BroadcastMsg -> Maybe Msg
+receiveBroadcast broadcastMsg =
+    case broadcastMsg of
+        LoggedIn.CommunityLoaded community ->
+            Just (CompletedLoadCommunity community)
 
         _ ->
             Nothing
@@ -602,26 +544,23 @@ jsAddressToMsg addr _ =
 msgToString : Msg -> List String
 msgToString msg =
     case msg of
-        Ignored ->
-            [ "Ignored" ]
-
-        GotTime _ ->
-            [ "GotTime" ]
-
         CompletedSalesLoad r ->
-            [ "CompletedSalesLoad", UR.resultToString r ]
+            [ "CompletedSalesLoad", UR.remoteDataToString r ]
 
-        ClickedSendTransfer _ _ ->
-            [ "ClickedSendTransfer" ]
+        CompletedLoadCommunity _ ->
+            [ "CompletedLoadCommunity" ]
 
         TransferSuccess index ->
             [ "TransferSuccess", String.fromInt index ]
-
-        ClickedMessages _ _ ->
-            [ "ClickedMessages" ]
 
         ClickedFilter _ ->
             [ "ClickedFilter" ]
 
         CompletedLoadBalances _ ->
             [ "CompletedLoadBalances" ]
+
+        OnImageError _ ->
+            [ "OnImageError" ]
+
+        GotProfileSummaryMsg _ _ subMsg ->
+            "GotProfileSummaryMsg" :: Profile.Summary.msgToString subMsg

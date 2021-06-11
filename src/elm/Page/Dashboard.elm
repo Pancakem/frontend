@@ -1,43 +1,52 @@
-module Page.Dashboard exposing (Model, Msg, init, jsAddressToMsg, msgToString, subscriptions, update, view)
+module Page.Dashboard exposing
+    ( Model
+    , Msg(..)
+    , init
+    , jsAddressToMsg
+    , msgToString
+    , receiveBroadcast
+    , update
+    , view
+    )
 
 import Api
 import Api.Graphql
-import Cambiatus.Object
-import Cambiatus.Object.Action as Action
-import Cambiatus.Object.Check as Check
-import Cambiatus.Object.Claim as Claim exposing (ChecksOptionalArguments)
-import Cambiatus.Object.Community as Community
-import Cambiatus.Object.Objective as Objective
-import Cambiatus.Query exposing (ClaimsRequiredArguments)
-import Cambiatus.Scalar exposing (DateTime(..))
-import Community exposing (ActionVerification, ActionVerificationsResponse, Balance, ClaimResponse, Metadata, Transaction)
-import Eos as Eos exposing (Symbol)
+import Api.Relay
+import Cambiatus.Enum.Direction
+import Cambiatus.Query
+import Claim
+import Community exposing (Balance)
+import Eos
 import Eos.Account as Eos
-import FormatNumber exposing (format)
+import Eos.EosError as EosError
+import FormatNumber
 import FormatNumber.Locales exposing (usLocale)
 import Graphql.Http
-import Graphql.Operation exposing (RootQuery)
 import Graphql.OptionalArgument exposing (OptionalArgument(..))
-import Graphql.SelectionSet as SelectionSet exposing (SelectionSet, with)
-import Html exposing (..)
-import Html.Attributes exposing (class, src, value)
+import Html exposing (Html, a, button, div, img, p, span, text)
+import Html.Attributes exposing (class, classList, src)
+import Html.Events exposing (onClick)
 import Http
-import I18Next exposing (Delims(..), t)
-import Json.Decode exposing (Decoder, Value)
+import Icons
+import Json.Decode as Decode exposing (Value)
+import Json.Encode as Encode
 import List.Extra as List
 import Page
-import Page.Dashboard.Community as DashCommunity
+import Profile
+import Profile.Contact as Contact
+import Profile.Summary
+import RemoteData exposing (RemoteData)
 import Route
-import Session.LoggedIn as LoggedIn exposing (External(..), ProfileStatus)
-import Session.Shared as Shared exposing (Shared)
-import Strftime
-import Task
-import Time exposing (Posix)
-import Transfer exposing (QueryTransfers, Transfer, userFilter)
+import Session.LoggedIn as LoggedIn
+import Session.Shared exposing (Shared)
+import Shop
+import Time
+import Transfer exposing (QueryTransfers, Transfer)
 import UpdateResult as UR
-import Utils
-import View.Loading as Loading
-import View.Tag as Tag
+import Url
+import View.Feedback as Feedback
+import View.Form.Input as Input
+import View.Modal as Modal
 
 
 
@@ -45,25 +54,14 @@ import View.Tag as Tag
 
 
 init : LoggedIn.Model -> ( Model, Cmd Msg )
-init { shared, accountName } =
+init ({ shared, accountName, authToken } as loggedIn) =
     ( initModel
     , Cmd.batch
-        [ fetchVerifications shared accountName
-        , fetchBalance shared accountName
-        , fetchTransfers shared accountName
-        , fetchClaims shared accountName
-        , Task.perform GotTime Time.now
+        [ fetchTransfers shared accountName authToken
+        , LoggedIn.maybeInitWith CompletedLoadCommunity .selectedCommunity loggedIn
+        , LoggedIn.maybeInitWith CompletedLoadProfile .profile loggedIn
         ]
     )
-
-
-
--- SUBSCRIPTIONS
-
-
-subscriptions : Model -> Sub Msg
-subscriptions _ =
-    Sub.batch []
 
 
 
@@ -71,242 +69,426 @@ subscriptions _ =
 
 
 type alias Model =
-    { date : Maybe Posix
-    , communities : Status (List DashCommunity.Model)
+    { balance : RemoteData Http.Error (Maybe Balance)
+    , analysis : GraphqlStatus (Maybe Claim.Paginated) (List ClaimStatus)
+    , analysisFilter : Direction
+    , profileSummaries : List Profile.Summary.Model
     , lastSocket : String
     , transfers : GraphqlStatus (Maybe QueryTransfers) (List Transfer)
-    , verifications : GraphqlStatus ActionVerificationsResponse (List ActionVerification)
-    , claims : GraphqlStatus ActionVerificationsResponse (List ActionVerification)
+    , contactModel : Contact.Model
+    , showContactModal : Bool
+    , inviteModalStatus : InviteModalStatus
+    , claimModalStatus : Claim.ModalStatus
+    , copied : Bool
     }
 
 
 initModel : Model
 initModel =
-    { date = Nothing
-    , communities = Loading
+    { balance = RemoteData.NotAsked
+    , analysis = LoadingGraphql
+    , analysisFilter = initAnalysisFilter
+    , profileSummaries = []
     , lastSocket = ""
     , transfers = LoadingGraphql
-    , verifications = LoadingGraphql
-    , claims = LoadingGraphql
+    , contactModel = Contact.initSingle
+    , showContactModal = False
+    , inviteModalStatus = InviteModalClosed
+    , claimModalStatus = Claim.Closed
+    , copied = False
     }
 
 
-type Status a
-    = Loading
-    | Loaded a
-    | Failed Http.Error
+initAnalysisFilter : Direction
+initAnalysisFilter =
+    DESC
 
 
 type GraphqlStatus err a
     = LoadingGraphql
-    | LoadedGraphql a
+    | LoadedGraphql a (Maybe Api.Relay.PageInfo)
     | FailedGraphql (Graphql.Http.Error err)
+
+
+type ClaimStatus
+    = ClaimLoaded Claim.Model
+    | ClaimLoading Claim.Model
+    | ClaimVoted Claim.Model
+    | ClaimVoteFailed Claim.Model
+
+
+type InviteModalStatus
+    = InviteModalClosed
+    | InviteModalLoading
+    | InviteModalFailed String
+    | InviteModalLoaded String
+
+
+type Direction
+    = ASC
+    | DESC
 
 
 
 -- VIEW
 
 
-view : LoggedIn.Model -> Model -> Html Msg
-view loggedIn model =
-    let
-        t s =
-            I18Next.t loggedIn.shared.translations s
-    in
-    case ( model.communities, loggedIn.profile ) of
-        ( Loading, _ ) ->
-            Page.fullPageLoading
-
-        ( Failed e, _ ) ->
-            Page.fullPageError (t "menu.my_communities") e
-
-        ( Loaded communities, LoggedIn.Loaded profile ) ->
-            div [ class "container mx-auto" ]
-                [ div [ class "text-gray-600 text-2xl font-light flex mt-6 mb-4" ]
-                    [ text (t "menu.my_communities")
-                    , div [ class "text-indigo-500 ml-2 font-medium" ]
-                        [ text (profile.userName |> Maybe.withDefault (Eos.nameToString profile.account))
-                        ]
-                    ]
-                , viewBalances loggedIn communities
-                , viewVerifications loggedIn.shared model
-                , viewSections loggedIn model
-                ]
-
-        ( _, _ ) ->
-            Page.fullPageNotFound (t "menu.my_communities") ""
-
-
-viewVerifications : Shared -> Model -> Html Msg
-viewVerifications shared model =
+view : LoggedIn.Model -> Model -> { title : String, content : Html Msg }
+view ({ shared, accountName } as loggedIn) model =
     let
         t =
-            I18Next.t shared.translations
+            shared.translators.t
 
-        toView verifications =
-            List.map
-                (viewVerification shared)
-                verifications
+        isCommunityAdmin =
+            case loggedIn.selectedCommunity of
+                RemoteData.Success community ->
+                    community.creator == accountName
+
+                _ ->
+                    False
+
+        areObjectivesEnabled =
+            case loggedIn.selectedCommunity of
+                RemoteData.Success community ->
+                    community.hasObjectives
+
+                _ ->
+                    False
+
+        content =
+            case ( model.balance, loggedIn.selectedCommunity ) of
+                ( RemoteData.Loading, _ ) ->
+                    Page.fullPageLoading shared
+
+                ( RemoteData.NotAsked, _ ) ->
+                    Page.fullPageLoading shared
+
+                ( RemoteData.Failure e, _ ) ->
+                    Page.fullPageError (t "dashboard.sorry") e
+
+                ( RemoteData.Success (Just balance), RemoteData.Success community ) ->
+                    div [ class "container mx-auto px-4 mb-10" ]
+                        [ viewHeader loggedIn community isCommunityAdmin
+                        , viewBalance loggedIn model balance
+                        , if areObjectivesEnabled && List.any (\account -> account == loggedIn.accountName) community.validators then
+                            viewAnalysisList loggedIn model
+
+                          else
+                            text ""
+                        , viewTransfers loggedIn model
+                        , viewInvitationModal loggedIn model
+                        , addContactModal shared model
+                        ]
+
+                ( RemoteData.Success _, _ ) ->
+                    Page.fullPageNotFound (t "dashboard.sorry") ""
     in
-    div
-        []
-        [ Page.viewTitle (t "dashboard.activities.title")
-        , case model.verifications of
-            LoadingGraphql ->
-                viewNoVerification
-                    [ Loading.view "text-gray-900" ]
+    { title = t "menu.dashboard"
+    , content = content
+    }
 
-            FailedGraphql err ->
-                viewNoVerification
-                    [ p
-                        [ class "font-sans text-gray-900 text-sm" ]
-                        [ text (Page.errorToString err) ]
+
+viewHeader : LoggedIn.Model -> Community.Model -> Bool -> Html Msg
+viewHeader loggedIn community isCommunityAdmin =
+    div [ class "flex inline-block text-gray-600 font-light mt-6 mb-5" ]
+        [ div []
+            [ text (loggedIn.shared.translators.t "menu.my_communities")
+            , span [ class "text-indigo-500 font-medium" ]
+                [ text community.name
+                ]
+            ]
+        , if isCommunityAdmin then
+            a
+                [ Route.href Route.CommunitySettings
+                , class "ml-auto"
+                ]
+                [ Icons.settings ]
+
+          else
+            text ""
+        ]
+
+
+addContactModal : Shared -> Model -> Html Msg
+addContactModal shared ({ contactModel } as model) =
+    let
+        text_ s =
+            shared.translators.t s
+                |> text
+
+        header =
+            div [ class "mt-4" ]
+                [ p [ class "inline bg-purple-100 text-white rounded-full py-0.5 px-2 text-caption uppercase" ]
+                    [ text_ "contact_modal.new" ]
+                , p [ class "text-heading font-bold mt-2" ]
+                    [ text_ "contact_modal.title" ]
+                ]
+
+        form =
+            Contact.view shared.translators contactModel
+                |> Html.map GotContactMsg
+    in
+    Modal.initWith
+        { closeMsg = ClosedAddContactModal
+        , isVisible = model.showContactModal
+        }
+        |> Modal.withBody
+            [ header
+            , img [ class "mx-auto mt-10", src "/images/girl-with-phone.svg" ] []
+            , form
+            , p [ class "text-caption text-center uppercase my-4" ]
+                [ text_ "contact_modal.footer" ]
+            ]
+        |> Modal.withLarge True
+        |> Modal.toHtml
+
+
+viewInvitationModal : LoggedIn.Model -> Model -> Html Msg
+viewInvitationModal { shared } model =
+    let
+        t =
+            shared.translators.t
+
+        text_ s =
+            text (t s)
+
+        protocol =
+            case shared.url.protocol of
+                Url.Http ->
+                    "http://"
+
+                Url.Https ->
+                    "https://"
+
+        url invitationId =
+            let
+                portStr =
+                    case shared.url.port_ of
+                        Just p ->
+                            ":" ++ String.fromInt p
+
+                        Nothing ->
+                            ""
+            in
+            protocol ++ shared.url.host ++ portStr ++ "/invite/" ++ invitationId
+
+        isInviteModalVisible =
+            case model.inviteModalStatus of
+                InviteModalClosed ->
+                    False
+
+                _ ->
+                    True
+
+        header =
+            t "community.invite.title"
+
+        body =
+            case model.inviteModalStatus of
+                InviteModalClosed ->
+                    []
+
+                InviteModalLoading ->
+                    [ div [ class "spinner m-auto" ] [] ]
+
+                InviteModalFailed err ->
+                    [ p [ class "text-center text-red" ] [ text err ] ]
+
+                InviteModalLoaded invitationId ->
+                    [ div [ class "mt-3 input-label" ]
+                        [ text_ "community.invite.label" ]
+                    , p [ class "py-2 md:text-heading text-black" ]
+                        [ text (url invitationId) ]
+                    , Input.init
+                        { label = ""
+                        , id = "invitation-id"
+                        , onInput = \_ -> NoOp
+                        , disabled = False
+                        , value = url invitationId
+                        , placeholder = Nothing
+                        , problems = Nothing
+                        , translators = shared.translators
+                        }
+                        |> Input.withAttrs [ class "absolute opacity-0 left-[-9999em]" ]
+                        |> Input.withContainerAttrs [ class "mb-0 overflow-hidden" ]
+                        |> Input.toHtml
                     ]
 
-            LoadedGraphql verifications ->
-                if List.isEmpty verifications then
-                    viewNoVerification
-                        [ p
-                            [ class "font-sans text-gray-900 text-sm" ]
-                            [ text (t "dashboard.activities.no_activities_yet") ]
+        footer =
+            case model.inviteModalStatus of
+                InviteModalLoaded _ ->
+                    [ button
+                        [ classList
+                            [ ( "button-primary", not model.copied )
+                            , ( "button-success", model.copied )
+                            ]
+                        , class "button w-full md:w-48 select-all"
+                        , onClick (CopyToClipboard "invitation-id")
                         ]
+                        [ if model.copied then
+                            text_ "community.invite.copied"
 
-                else
-                    div
-                        [ class "rounded-lg bg-white mt-5" ]
-                        (toView verifications)
-        ]
+                          else
+                            text_ "community.invite.copy"
+                        ]
+                    ]
 
+                InviteModalFailed _ ->
+                    [ button
+                        [ class "button button-primary"
+                        , onClick CloseInviteModal
+                        ]
+                        [ text_ "menu.close" ]
+                    ]
 
-viewVerification : Shared -> ActionVerification -> Html Msg
-viewVerification shared verification =
-    let
-        maybeLogo =
-            if String.isEmpty verification.logo then
-                Nothing
-
-            else
-                Just (shared.endpoints.ipfs ++ "/" ++ verification.logo)
-
-        description =
-            verification.description
-
-        date =
-            Just verification.createdAt
-                |> Utils.posixDateTime
-                |> Strftime.format "%d %b %Y" Time.utc
-
-        status =
-            verification.status
-
-        route =
-            case verification.symbol of
-                Just symbol ->
-                    Route.VerifyClaim
-                        symbol
-                        verification.objectiveId
-                        verification.actionId
-                        verification.claimId
-
-                Nothing ->
-                    Route.ComingSoon
+                _ ->
+                    []
     in
-    a
-        [ class "border-b last:border-b-0 border-gray-500 flex items-start lg:items-center hover:bg-gray-100 first-hover:rounded-t-lg last-hover:rounded-b-lg p-4"
-        , Route.href route
-        ]
-        [ div
-            [ class "flex-none" ]
-            [ case maybeLogo of
-                Just logoUrl ->
-                    img
-                        [ class "w-10 h-10 object-scale-down"
-                        , src logoUrl
-                        ]
-                        []
-
-                Nothing ->
-                    div
-                        [ class "w-10 h-10 object-scale-down" ]
-                        []
-            ]
-        , div
-            [ class "flex-col flex-grow-1 pl-4" ]
-            [ p
-                [ class "font-sans text-black text-sm leading-relaxed" ]
-                [ text description ]
-            , p
-                [ class "font-normal font-sans text-gray-900 text-caption uppercase" ]
-                [ text date ]
-            , div
-                [ class "lg:hidden mt-4" ]
-                [ Tag.view status shared.translations ]
-            ]
-        , div
-            [ class "hidden lg:visible lg:flex lg:flex-none pl-4" ]
-            [ Tag.view status shared.translations ]
-        ]
+    Modal.initWith
+        { closeMsg = CloseInviteModal
+        , isVisible = isInviteModalVisible
+        }
+        |> Modal.withHeader header
+        |> Modal.withBody body
+        |> Modal.withFooter footer
+        |> Modal.toHtml
 
 
-viewNoVerification : List (Html Msg) -> Html Msg
-viewNoVerification elements =
-    div
-        [ class "rounded-lg bg-white mt-5 p-4" ]
-        [ div
-            [ class "bg-white-smoke flex items-center justify-center p-8" ]
-            elements
-        ]
-
-
-viewSections : LoggedIn.Model -> Model -> Html Msg
-viewSections loggedIn model =
+viewAnalysisList : LoggedIn.Model -> Model -> Html Msg
+viewAnalysisList loggedIn model =
     let
-        t s =
-            I18Next.t loggedIn.shared.translations s
+        text_ s =
+            text <| loggedIn.shared.translators.t s
 
-        viewAccountName accountName =
-            Eos.nameToString accountName
+        isVoted : List ClaimStatus -> Bool
+        isVoted claims =
+            List.all
+                (\c ->
+                    case c of
+                        ClaimVoted _ ->
+                            True
 
-        transferInfo from value to =
-            [ ( "from", viewAccountName from )
-            , ( "value", String.fromFloat value )
-            , ( "to", viewAccountName to )
-            ]
-                |> I18Next.tr loggedIn.shared.translations I18Next.Curly "transfer.info"
-
-        toView claims =
-            List.map
-                (viewVerification loggedIn.shared)
+                        _ ->
+                            False
+                )
                 claims
     in
-    Page.viewMaxTwoColumn
-        [ Page.viewTitle (t "community.actions.last_title")
-        , case model.claims of
-            LoadingGraphql ->
-                viewNoVerification
-                    [ Loading.view "text-gray-900" ]
+    case model.analysis of
+        LoadingGraphql ->
+            Page.fullPageLoading loggedIn.shared
 
-            FailedGraphql err ->
-                viewNoVerification
-                    [ p
-                        [ class "font-sans text-gray-900 text-sm" ]
-                        [ text (Page.errorToString err) ]
-                    ]
-
-            LoadedGraphql claims ->
-                if List.isEmpty claims then
-                    viewNoVerification
-                        [ p
-                            [ class "font-sans text-gray-900 text-sm" ]
-                            [ text (t "dashboard.activities.no_activities_yet") ]
+        LoadedGraphql claims _ ->
+            div [ class "w-full flex" ]
+                [ div
+                    [ class "w-full" ]
+                    [ div [ class "flex justify-between text-gray-600 text-2xl font-light flex mt-4 mb-4" ]
+                        [ div [ class "flex" ]
+                            [ div [ class "text-indigo-500 mr-2 font-medium" ]
+                                [ text_ "dashboard.analysis.title.1"
+                                ]
+                            , text_ "dashboard.analysis.title.2"
+                            ]
+                        , div [ class "flex justify-between space-x-4" ]
+                            [ button
+                                [ class "w-full button button-secondary"
+                                , onClick ToggleAnalysisSorting
+                                ]
+                                [ Icons.sortDirection ""
+                                ]
+                            , a
+                                [ class "button button-secondary font-medium "
+                                , Route.href Route.Analysis
+                                ]
+                                [ text_ "dashboard.analysis.all" ]
+                            ]
                         ]
+                    , if isVoted claims then
+                        div [ class "flex flex-col w-full items-center justify-center px-3 py-12 my-2 rounded-lg bg-white" ]
+                            [ img [ src "/images/not_found.svg", class "object-contain h-32 mb-3" ] []
+                            , p [ class "flex text-body text-gray-600" ]
+                                [ p [ class "font-bold" ] [ text_ "dashboard.analysis.empty.1" ]
+                                , text_ "dashboard.analysis.empty.2"
+                                ]
+                            , p [ class "text-body text-gray-600" ] [ text_ "dashboard.analysis.empty.3" ]
+                            ]
 
-                else
-                    div
-                        [ class "rounded-lg bg-white " ]
-                        (toView claims)
-        ]
-        [ Page.viewTitle (t "transfer.last_title")
+                      else
+                        let
+                            pendingClaims =
+                                List.map3 (viewAnalysis loggedIn)
+                                    model.profileSummaries
+                                    (List.range 0 (List.length claims))
+                                    claims
+                        in
+                        div [ class "flex flex-wrap -mx-2" ] <|
+                            List.append pendingClaims
+                                [ viewVoteConfirmationModal loggedIn model ]
+                    ]
+                ]
+
+        FailedGraphql err ->
+            div [] [ Page.fullPageGraphQLError "Failed load" err ]
+
+
+viewVoteConfirmationModal : LoggedIn.Model -> Model -> Html Msg
+viewVoteConfirmationModal loggedIn { claimModalStatus } =
+    let
+        viewVoteModal claimId isApproving isLoading =
+            Claim.viewVoteClaimModal
+                loggedIn.shared.translators
+                { voteMsg = VoteClaim
+                , closeMsg = ClaimMsg 0 Claim.CloseClaimModals
+                , claimId = claimId
+                , isApproving = isApproving
+                , isInProgress = isLoading
+                }
+    in
+    case claimModalStatus of
+        Claim.VoteConfirmationModal claimId vote ->
+            viewVoteModal claimId vote False
+
+        Claim.Loading claimId vote ->
+            viewVoteModal claimId vote True
+
+        Claim.PhotoModal claim ->
+            Claim.viewPhotoModal loggedIn claim
+                |> Html.map (ClaimMsg 0)
+
+        Claim.Closed ->
+            text ""
+
+
+viewAnalysis : LoggedIn.Model -> Profile.Summary.Model -> Int -> ClaimStatus -> Html Msg
+viewAnalysis loggedIn profileSummary claimIndex claimStatus =
+    case claimStatus of
+        ClaimLoaded claim ->
+            Claim.viewClaimCard loggedIn profileSummary claim
+                |> Html.map (ClaimMsg claimIndex)
+
+        ClaimLoading _ ->
+            div [ class "w-full md:w-1/2 lg:w-1/3 xl:w-1/4 px-2 mb-4" ]
+                [ div [ class "rounded-lg bg-white h-56 my-2 pt-8" ]
+                    [ Page.fullPageLoading loggedIn.shared ]
+                ]
+
+        ClaimVoted _ ->
+            text ""
+
+        ClaimVoteFailed claim ->
+            Claim.viewClaimCard loggedIn profileSummary claim
+                |> Html.map (ClaimMsg claimIndex)
+
+
+viewTransfers : LoggedIn.Model -> Model -> Html Msg
+viewTransfers loggedIn model =
+    let
+        t =
+            loggedIn.shared.translators.t
+    in
+    div [ class "mt-4" ]
+        [ div [ class "text-2xl text-indigo-500 mr-2 font-medium mb-4" ]
+            [ text <| t "transfer.last_title"
+            ]
         , case model.transfers of
             LoadingGraphql ->
                 Page.viewCardEmpty
@@ -320,13 +502,13 @@ viewSections loggedIn model =
                         [ text (t "transfer.loading_error") ]
                     ]
 
-            LoadedGraphql [] ->
+            LoadedGraphql [] _ ->
                 Page.viewCardEmpty
                     [ div [ class "text-gray-900 text-sm" ]
                         [ text (t "transfer.no_transfers_yet") ]
                     ]
 
-            LoadedGraphql transfers ->
+            LoadedGraphql transfers _ ->
                 div [ class "rounded-lg bg-white" ]
                     (List.map (\transfer -> viewTransfer loggedIn transfer) transfers)
         ]
@@ -350,17 +532,17 @@ viewTransfer ({ shared } as loggedIn) transfer =
                 [ ( "user", Eos.nameToString transfer.from.account )
                 , ( "amount", String.fromFloat transfer.value )
                 ]
-                    |> I18Next.tr shared.translations I18Next.Curly "notifications.transfer.receive"
+                    |> shared.translators.tr "notifications.transfer.receive"
 
             else
                 [ ( "user", Eos.nameToString transfer.to.account )
                 , ( "amount", String.fromFloat transfer.value )
                 ]
-                    |> I18Next.tr shared.translations I18Next.Curly "notifications.transfer.sent"
+                    |> shared.translators.tr "notifications.transfer.sent"
     in
     a
         [ class "flex items-start lg:items-center p-4 border-b last:border-b-0"
-        , Route.href (Route.Transfer transfer.id)
+        , Route.externalHref shared transfer.community (Route.ViewTransfer transfer.id)
         ]
         [ div [ class "flex-col flex-grow-1 pl-4" ]
             [ p
@@ -371,7 +553,7 @@ viewTransfer ({ shared } as loggedIn) transfer =
                 [ text (Maybe.withDefault "" transfer.memo) ]
             ]
         , div [ class "flex flex-none pl-4" ]
-            (viewAmount amount (Eos.symbolToString transfer.symbol))
+            (viewAmount amount (Eos.symbolToSymbolCodeString transfer.community.symbol))
         ]
 
 
@@ -389,24 +571,114 @@ viewAmount amount symbol =
                 "text-red"
     in
     [ div [ class "text-2xl", class color ] [ text amountText ]
-    , div [ class "uppercase text-sm font-thin mt-3 ml-2 font-sans", class color ] [ text symbol ]
+    , div [ class "uppercase text-sm font-extralight mt-3 ml-2 font-sans", class color ] [ text symbol ]
     ]
 
 
+viewBalance : LoggedIn.Model -> Model -> Balance -> Html Msg
+viewBalance ({ shared } as loggedIn) _ balance =
+    let
+        text_ =
+            text << shared.translators.t
 
--- VIEW GRID
+        symbolText =
+            Eos.symbolToSymbolCodeString balance.asset.symbol
+
+        balanceText =
+            String.fromFloat balance.asset.amount ++ " "
+    in
+    div [ class "flex-wrap flex lg:space-x-3" ]
+        [ div [ class "flex w-full lg:w-1/3 bg-white rounded h-64 p-4" ]
+            [ div [ class "w-full" ]
+                (div [ class "input-label mb-2" ]
+                    [ text_ "account.my_wallet.balances.current" ]
+                    :: div [ class "flex items-center mb-4" ]
+                        [ div [ class "text-indigo-500 font-bold text-3xl" ]
+                            [ text balanceText ]
+                        , div [ class "text-indigo-500 ml-2" ]
+                            [ text symbolText ]
+                        ]
+                    :: (case loggedIn.selectedCommunity of
+                            RemoteData.Success community ->
+                                [ a
+                                    [ class "button button-primary w-full font-medium mb-2"
+                                    , Route.href <| Route.Transfer Nothing
+                                    ]
+                                    [ text_ "dashboard.transfer" ]
+                                , a
+                                    [ class "flex w-full items-center justify-between h-12 text-gray-600 border-b"
+                                    , Route.href Route.Community
+                                    ]
+                                    [ text <| shared.translators.tr "dashboard.explore" [ ( "symbol", Eos.symbolToSymbolCodeString community.symbol ) ]
+                                    , Icons.arrowDown "rotate--90"
+                                    ]
+                                ]
+
+                            _ ->
+                                []
+                       )
+                    ++ [ button
+                            [ class "flex w-full items-center justify-between h-12 text-gray-600"
+                            , onClick CreateInvite
+                            ]
+                            [ text_ "dashboard.invite", Icons.arrowDown "rotate--90 text-gray-600" ]
+                       ]
+                )
+            ]
+        , div [ class "w-full lg:w-1/3 mt-4 lg:mt-0" ]
+            [ viewQuickLinks loggedIn
+            ]
+        ]
 
 
-viewBalances : LoggedIn.Model -> List DashCommunity.Model -> Html Msg
-viewBalances loggedIn communities =
-    div [ class "flex flex-wrap -mx-2" ]
-        (List.indexedMap
-            (\i c ->
-                DashCommunity.viewCard loggedIn i c
-                    |> Html.map (GotDashCommunityMsg i)
-            )
-            communities
-        )
+viewQuickLinks : LoggedIn.Model -> Html Msg
+viewQuickLinks ({ shared } as loggedIn) =
+    let
+        t =
+            shared.translators.t
+    in
+    div [ class "flex-wrap flex" ]
+        [ div [ class "w-1/2 lg:w-full" ]
+            [ case RemoteData.map .hasObjectives loggedIn.selectedCommunity of
+                RemoteData.Success True ->
+                    a
+                        [ class "flex flex-wrap mr-2 px-4 py-6 rounded bg-white hover:shadow lg:flex-nowrap lg:justify-between lg:items-center lg:mb-6 lg:mr-0"
+                        , Route.href (Route.ProfileClaims (Eos.nameToString loggedIn.accountName))
+                        ]
+                        [ div []
+                            [ div [ class "w-full mb-4" ] [ Icons.claims "w-8 h-8" ]
+                            , p [ class "w-full h-12 lg:h-auto text-gray-600 mb-4 lg:mb-0" ]
+                                [ text <| t "dashboard.my_claims.1"
+                                , span [ class "font-bold" ] [ text <| t "dashboard.my_claims.2" ]
+                                ]
+                            ]
+                        , div [ class "w-full lg:w-1/3 button button-primary" ] [ text <| t "dashboard.my_claims.go" ]
+                        ]
+
+                _ ->
+                    text ""
+            ]
+        , div [ class "w-1/2 lg:w-full" ]
+            [ case RemoteData.map .hasShop loggedIn.selectedCommunity of
+                RemoteData.Success True ->
+                    a
+                        [ class "flex flex-wrap ml-2 px-4 py-6 rounded bg-white hover:shadow lg:flex-nowrap lg:justify-between lg:items-center lg:ml-0"
+                        , Route.href (Route.Shop Shop.UserSales)
+                        ]
+                        [ div []
+                            [ div [ class "w-full mb-4 lg:mb-2" ] [ Icons.shop "w-8 h-8 fill-current" ]
+                            , p [ class "w-full h-12 lg:h-auto text-gray-600 mb-4 lg:mb-0" ]
+                                [ text <| t "dashboard.my_offers.1"
+                                , span [ class "font-bold" ] [ text <| t "dashboard.my_offers.2" ]
+                                ]
+                            ]
+                        , div [ class "w-full lg:w-1/3 button button-primary" ] [ text <| t "dashboard.my_offers.go" ]
+                        ]
+
+                _ ->
+                    text ""
+            ]
+        ]
 
 
 
@@ -414,185 +686,382 @@ viewBalances loggedIn communities =
 
 
 type alias UpdateResult =
-    UR.UpdateResult Model Msg (External Msg)
+    UR.UpdateResult Model Msg (LoggedIn.External Msg)
 
 
 type Msg
-    = GotTime Posix
-    | CompletedLoadBalances (Result Http.Error (List Balance))
-    | GotDashCommunityMsg Int DashCommunity.Msg
-    | CompletedLoadUserTransfers (Result (Graphql.Http.Error (Maybe QueryTransfers)) (Maybe QueryTransfers))
-    | CompletedLoadVerifications (Result (Graphql.Http.Error ActionVerificationsResponse) ActionVerificationsResponse)
-    | CompletedLoadClaims (Result (Graphql.Http.Error ActionVerificationsResponse) ActionVerificationsResponse)
+    = NoOp
+    | CompletedLoadCommunity Community.Model
+    | CompletedLoadProfile Profile.Model
+    | CompletedLoadBalance (Result Http.Error (Maybe Balance))
+    | CompletedLoadUserTransfers (RemoteData (Graphql.Http.Error (Maybe QueryTransfers)) (Maybe QueryTransfers))
+    | ClaimsLoaded (RemoteData (Graphql.Http.Error (Maybe Claim.Paginated)) (Maybe Claim.Paginated))
+    | ClaimMsg Int Claim.Msg
+    | VoteClaim Claim.ClaimId Bool
+    | GotVoteResult Claim.ClaimId (Result (Maybe Value) String)
+    | CreateInvite
+    | GotContactMsg Contact.Msg
+    | ClosedAddContactModal
+    | CloseInviteModal
+    | CompletedInviteCreation (Result Http.Error String)
+    | CopyToClipboard String
+    | CopiedToClipboard
+    | ToggleAnalysisSorting
 
 
 update : Msg -> Model -> LoggedIn.Model -> UpdateResult
-update msg model loggedIn =
+update msg model ({ shared, accountName } as loggedIn) =
     case msg of
-        GotTime date ->
-            UR.init { model | date = Just date }
+        NoOp ->
+            UR.init model
 
-        CompletedLoadBalances (Ok balances) ->
+        CompletedLoadCommunity community ->
+            UR.init
+                { model
+                    | balance = RemoteData.Loading
+                    , analysis = LoadingGraphql
+                }
+                |> UR.addCmd (fetchBalance shared accountName community)
+                |> UR.addCmd (fetchAvailableAnalysis loggedIn Nothing model.analysisFilter community)
+
+        CompletedLoadProfile profile ->
             let
-                ( communities, commCmds ) =
-                    List.indexedMap
-                        (\i b ->
-                            DashCommunity.init loggedIn b
-                                |> Tuple.mapSecond
-                                    (Cmd.map (GotDashCommunityMsg i))
-                        )
-                        (sortCambiatusFirst loggedIn balances)
-                        |> List.unzip
+                addContactLimitDate =
+                    -- 01/01/2022
+                    1641006000000
+
+                showContactModalFromDate =
+                    addContactLimitDate - Time.posixToMillis shared.now > 0
             in
-            UR.init { model | communities = Loaded communities }
-                |> UR.addCmd (Cmd.batch commCmds)
-
-        CompletedLoadBalances (Err httpError) ->
-            UR.init { model | communities = Failed httpError }
-                |> UR.logHttpError msg httpError
-
-        GotDashCommunityMsg index subMsg ->
-            case model.communities of
-                Loaded communities ->
-                    DashCommunity.update loggedIn subMsg
-                        |> updateDashCommunity index communities model
-
-                _ ->
-                    UR.init model
-                        |> UR.logImpossible msg []
-
-        CompletedLoadUserTransfers (Ok maybeTransfers) ->
-            { model | transfers = LoadedGraphql (Transfer.getTransfers maybeTransfers) }
+            { model | showContactModal = showContactModalFromDate && List.isEmpty profile.contacts }
                 |> UR.init
 
-        CompletedLoadUserTransfers (Err err) ->
+        CompletedLoadBalance (Ok balance) ->
+            UR.init { model | balance = RemoteData.Success balance }
+
+        CompletedLoadBalance (Err httpError) ->
+            UR.init { model | balance = RemoteData.Failure httpError }
+                |> UR.logHttpError msg httpError
+
+        ClaimsLoaded (RemoteData.Success claims) ->
+            let
+                wrappedClaims =
+                    List.map ClaimLoaded (Claim.paginatedToList claims)
+
+                initProfileSummaries cs =
+                    List.length cs
+                        |> Profile.Summary.initMany False
+            in
+            case model.analysis of
+                LoadedGraphql existingClaims _ ->
+                    { model
+                        | analysis = LoadedGraphql (existingClaims ++ wrappedClaims) (Claim.paginatedPageInfo claims)
+                        , profileSummaries = initProfileSummaries (existingClaims ++ wrappedClaims)
+                    }
+                        |> UR.init
+
+                _ ->
+                    { model
+                        | analysis = LoadedGraphql wrappedClaims (Claim.paginatedPageInfo claims)
+                        , profileSummaries = initProfileSummaries wrappedClaims
+                    }
+                        |> UR.init
+
+        ClaimsLoaded (RemoteData.Failure err) ->
+            { model | analysis = FailedGraphql err }
+                |> UR.init
+                |> UR.logGraphqlError msg err
+
+        ClaimsLoaded _ ->
+            UR.init model
+
+        CompletedLoadUserTransfers (RemoteData.Success maybeTransfers) ->
+            { model | transfers = LoadedGraphql (Transfer.getTransfers maybeTransfers) Nothing }
+                |> UR.init
+
+        CompletedLoadUserTransfers (RemoteData.Failure err) ->
             { model | transfers = FailedGraphql err }
                 |> UR.init
                 |> UR.logGraphqlError msg err
 
-        CompletedLoadVerifications (Ok result) ->
-            { model | verifications = LoadedGraphql (Community.toVerifications result) }
+        CompletedLoadUserTransfers _ ->
+            UR.init model
+
+        ClaimMsg claimIndex m ->
+            let
+                claimCmd =
+                    case m of
+                        Claim.RouteOpened r ->
+                            Route.replaceUrl loggedIn.shared.navKey r
+
+                        _ ->
+                            Cmd.none
+
+                updatedProfileSummaries =
+                    case m of
+                        Claim.GotProfileSummaryMsg subMsg ->
+                            List.updateAt claimIndex
+                                (Profile.Summary.update subMsg)
+                                model.profileSummaries
+
+                        _ ->
+                            model.profileSummaries
+            in
+            { model | profileSummaries = updatedProfileSummaries }
+                |> Claim.updateClaimModalStatus m
                 |> UR.init
+                |> UR.addCmd claimCmd
 
-        CompletedLoadVerifications (Err err) ->
-            { model | verifications = FailedGraphql err }
-                |> UR.init
-                |> UR.logGraphqlError msg err
+        VoteClaim claimId vote ->
+            case model.analysis of
+                LoadedGraphql claims pageInfo ->
+                    let
+                        newClaims =
+                            setClaimStatus claims claimId ClaimLoading
 
-        CompletedLoadClaims (Ok result) ->
-            { model | claims = LoadedGraphql (Community.toVerifications result) }
-                |> UR.init
-
-        CompletedLoadClaims (Err err) ->
-            { model | claims = FailedGraphql err }
-                |> UR.init
-                |> UR.logGraphqlError msg err
-
-
-updateDashCommunity : Int -> List DashCommunity.Model -> Model -> (DashCommunity.Model -> DashCommunity.UpdateResult) -> UpdateResult
-updateDashCommunity index communities model subUpdate =
-    let
-        ( updtUModel, updtCommunities ) =
-            List.indexedFoldl
-                (\i c ( m_, comms_ ) ->
-                    if index == i then
-                        subUpdate c
-                            |> updateDashCommunityUpdateResult index m_
-                            |> (\( x, y ) -> ( x, comms_ ++ [ y ] ))
+                        newModel =
+                            { model
+                                | analysis = LoadedGraphql newClaims pageInfo
+                                , claimModalStatus = Claim.Closed
+                            }
+                    in
+                    if LoggedIn.hasPrivateKey loggedIn then
+                        UR.init newModel
+                            |> UR.addPort
+                                { responseAddress = msg
+                                , responseData = Encode.null
+                                , data =
+                                    Eos.encodeTransaction
+                                        [ { accountName = loggedIn.shared.contracts.community
+                                          , name = "verifyclaim"
+                                          , authorization =
+                                                { actor = loggedIn.accountName
+                                                , permissionName = Eos.samplePermission
+                                                }
+                                          , data = Claim.encodeVerification claimId loggedIn.accountName vote
+                                          }
+                                        ]
+                                }
 
                     else
-                        ( m_, comms_ ++ [ c ] )
-                )
-                ( UR.init model, [] )
-                communities
-    in
-    UR.mapModel
-        (\m -> { m | communities = Loaded updtCommunities })
-        updtUModel
+                        UR.init newModel
+                            |> UR.addExt (Just (VoteClaim claimId vote) |> LoggedIn.RequiredAuthentication)
 
+                _ ->
+                    model
+                        |> UR.init
 
-updateDashCommunityUpdateResult : Int -> UpdateResult -> DashCommunity.UpdateResult -> ( UpdateResult, DashCommunity.Model )
-updateDashCommunityUpdateResult index uResult commUResult =
-    UR.map (\_ -> uResult.model)
-        (GotDashCommunityMsg index)
-        (\extMsg uResult_ ->
-            UR.addExt
-                (LoggedIn.mapExternal (GotDashCommunityMsg index) extMsg)
-                uResult_
-        )
-        commUResult
-        |> (\uR -> ( uR, commUResult.model ))
+        GotVoteResult claimId (Ok _) ->
+            case model.analysis of
+                LoadedGraphql claims pageInfo ->
+                    let
+                        maybeClaim : Maybe Claim.Model
+                        maybeClaim =
+                            findClaim claims claimId
+
+                        message val =
+                            [ ( "value", val ) ]
+                                |> loggedIn.shared.translators.tr "claim.reward"
+                    in
+                    case maybeClaim of
+                        Just claim ->
+                            let
+                                value =
+                                    String.fromFloat claim.action.verifierReward
+                                        ++ " "
+                                        ++ Eos.symbolToSymbolCodeString claim.action.objective.community.symbol
+
+                                cmd =
+                                    case ( pageInfo, loggedIn.selectedCommunity ) of
+                                        ( Just page, RemoteData.Success community ) ->
+                                            if page.hasNextPage then
+                                                fetchAvailableAnalysis loggedIn page.endCursor model.analysisFilter community
+
+                                            else
+                                                Cmd.none
+
+                                        ( _, _ ) ->
+                                            Cmd.none
+                            in
+                            { model
+                                | analysis = LoadedGraphql (setClaimStatus claims claimId ClaimVoted) pageInfo
+                            }
+                                |> UR.init
+                                |> UR.addExt (LoggedIn.ShowFeedback Feedback.Success (message value))
+                                |> UR.addCmd cmd
+
+                        Nothing ->
+                            model
+                                |> UR.init
+
+                _ ->
+                    model |> UR.init
+
+        GotVoteResult claimId (Err eosErrorString) ->
+            let
+                errorMessage =
+                    EosError.parseClaimError loggedIn.shared.translators eosErrorString
+            in
+            case model.analysis of
+                LoadedGraphql claims pageInfo ->
+                    { model | analysis = LoadedGraphql (setClaimStatus claims claimId ClaimVoteFailed) pageInfo }
+                        |> UR.init
+                        |> UR.addExt (LoggedIn.ShowFeedback Feedback.Failure errorMessage)
+
+                _ ->
+                    model |> UR.init
+
+        CreateInvite ->
+            case model.balance of
+                RemoteData.Success (Just b) ->
+                    UR.init
+                        { model | inviteModalStatus = InviteModalLoading }
+                        |> UR.addCmd
+                            (CompletedInviteCreation
+                                |> Api.communityInvite loggedIn.shared b.asset.symbol loggedIn.accountName
+                            )
+
+                _ ->
+                    UR.init model
+                        |> UR.logImpossible msg [ "balanceNotLoaded" ]
+
+        GotContactMsg subMsg ->
+            case LoggedIn.profile loggedIn of
+                Just userProfile ->
+                    let
+                        ( contactModel, cmd, contactResponse ) =
+                            Contact.update subMsg
+                                model.contactModel
+                                loggedIn.shared
+                                loggedIn.authToken
+                                userProfile.contacts
+
+                        addContactResponse model_ =
+                            case contactResponse of
+                                Contact.NotAsked ->
+                                    model_
+                                        |> UR.init
+
+                                Contact.WithError errorMessage ->
+                                    { model_ | showContactModal = False }
+                                        |> UR.init
+                                        |> UR.addExt (LoggedIn.ShowFeedback Feedback.Failure errorMessage)
+
+                                Contact.WithContacts successMessage contacts _ ->
+                                    let
+                                        newProfile =
+                                            { userProfile | contacts = contacts }
+                                    in
+                                    { model_ | showContactModal = False }
+                                        |> UR.init
+                                        |> UR.addExt (LoggedIn.ShowFeedback Feedback.Success successMessage)
+                                        |> UR.addExt
+                                            (LoggedIn.ProfileLoaded newProfile
+                                                |> LoggedIn.ExternalBroadcast
+                                            )
+                    in
+                    { model | contactModel = contactModel }
+                        |> addContactResponse
+                        |> UR.addCmd (Cmd.map GotContactMsg cmd)
+
+                Nothing ->
+                    model |> UR.init
+
+        ClosedAddContactModal ->
+            { model | showContactModal = False }
+                |> UR.init
+
+        CloseInviteModal ->
+            UR.init
+                { model
+                    | inviteModalStatus = InviteModalClosed
+                    , copied = False
+                }
+
+        CompletedInviteCreation (Ok invitationId) ->
+            { model | inviteModalStatus = InviteModalLoaded invitationId }
+                |> UR.init
+
+        CompletedInviteCreation (Err httpError) ->
+            UR.init
+                { model | inviteModalStatus = InviteModalFailed (loggedIn.shared.translators.t "community.invite.failed") }
+                |> UR.logHttpError msg httpError
+
+        CopyToClipboard elementId ->
+            model
+                |> UR.init
+                |> UR.addPort
+                    { responseAddress = CopiedToClipboard
+                    , responseData = Encode.null
+                    , data =
+                        Encode.object
+                            [ ( "id", Encode.string elementId )
+                            , ( "name", Encode.string "copyToClipboard" )
+                            ]
+                    }
+
+        CopiedToClipboard ->
+            { model | copied = True }
+                |> UR.init
+
+        ToggleAnalysisSorting ->
+            let
+                newModel =
+                    { model
+                        | analysisFilter =
+                            case model.analysisFilter of
+                                ASC ->
+                                    DESC
+
+                                DESC ->
+                                    ASC
+                        , analysis = LoadingGraphql
+                    }
+
+                fetchCmd =
+                    case loggedIn.selectedCommunity of
+                        RemoteData.Success community ->
+                            fetchAvailableAnalysis loggedIn Nothing newModel.analysisFilter community
+
+                        _ ->
+                            Cmd.none
+            in
+            newModel
+                |> UR.init
+                |> UR.addCmd fetchCmd
 
 
 
 -- HELPERS
 
 
-fetchClaims : Shared -> Eos.Name -> Cmd Msg
-fetchClaims shared accountName =
-    let
-        claimer : String
-        claimer =
-            Eos.nameToString accountName
+fetchBalance : Shared -> Eos.Name -> Community.Model -> Cmd Msg
+fetchBalance shared accountName community =
+    Api.getBalances shared
+        accountName
+        (Result.map
+            (\balances ->
+                let
+                    maybeBalance =
+                        List.find (.asset >> .symbol >> (==) community.symbol) balances
+                in
+                case maybeBalance of
+                    Just b ->
+                        Just b
 
-        selectionSet : SelectionSet ActionVerificationsResponse RootQuery
-        selectionSet =
-            verificationHistorySelectionSet False claimer
-    in
-    Api.Graphql.query
-        shared
-        selectionSet
-        CompletedLoadClaims
-
-
-fetchVerifications : Shared -> Eos.Name -> Cmd Msg
-fetchVerifications shared accountName =
-    let
-        validator : String
-        validator =
-            Eos.nameToString accountName
-
-        selectionSet : SelectionSet ActionVerificationsResponse RootQuery
-        selectionSet =
-            verificationHistorySelectionSet True validator
-    in
-    Api.Graphql.query
-        shared
-        selectionSet
-        CompletedLoadVerifications
+                    Nothing ->
+                        List.head balances
+            )
+            >> CompletedLoadBalance
+        )
 
 
-verificationHistorySelectionSet : Bool -> String -> SelectionSet ActionVerificationsResponse RootQuery
-verificationHistorySelectionSet forValidator accName =
-    let
-        qInput : ClaimsRequiredArguments
-        qInput =
-            if forValidator then
-                { input = { validator = Present accName, claimer = Absent, symbol = Absent }
-                }
-
-            else
-                { input = { claimer = Present accName, validator = Absent, symbol = Absent }
-                }
-
-        selectionSet : SelectionSet ClaimResponse Cambiatus.Object.Claim
-        selectionSet =
-            Community.claimSelectionSet accName
-    in
-    SelectionSet.succeed ActionVerificationsResponse
-        |> with (Cambiatus.Query.claims qInput selectionSet)
-
-
-fetchBalance : Shared -> Eos.Name -> Cmd Msg
-fetchBalance shared accountName =
-    Api.getBalances shared accountName CompletedLoadBalances
-
-
-fetchTransfers : Shared -> Eos.Name -> Cmd Msg
-fetchTransfers shared accountName =
+fetchTransfers : Shared -> Eos.Name -> String -> Cmd Msg
+fetchTransfers shared accountName authToken =
     Api.Graphql.query shared
-        (Transfer.transfersQuery
-            (userFilter accountName)
+        (Just authToken)
+        (Transfer.transfersUserQuery
+            accountName
             (\args ->
                 { args | first = Present 10 }
             )
@@ -600,66 +1069,191 @@ fetchTransfers shared accountName =
         CompletedLoadUserTransfers
 
 
-sortCambiatusFirst : LoggedIn.Model -> List Balance -> List Balance
-sortCambiatusFirst loggedIn balances =
+fetchAvailableAnalysis : LoggedIn.Model -> Maybe String -> Direction -> Community.Model -> Cmd Msg
+fetchAvailableAnalysis { shared, authToken } maybeCursor direction community =
     let
-        bespiral : Maybe Balance
-        bespiral =
-            balances
-                |> List.filter (\b -> b.asset.symbol == Shared.bespiralSymbol loggedIn.shared)
-                |> List.head
+        arg =
+            { communityId = Eos.symbolToString community.symbol
+            }
 
-        --|> Maybe.withDefault (Balance "" 0 False False)
-        balancesWithoutSpiral : List Balance
-        balancesWithoutSpiral =
-            balances
-                |> List.filter (\b -> b.asset.symbol /= Shared.bespiralSymbol loggedIn.shared)
+        optionalArguments =
+            \a ->
+                { a
+                    | first =
+                        case maybeCursor of
+                            Just _ ->
+                                Present 1
+
+                            Nothing ->
+                                Present 4
+                    , after =
+                        Maybe.andThen
+                            (\s ->
+                                if String.isEmpty s then
+                                    Nothing
+
+                                else
+                                    Just (Present s)
+                            )
+                            maybeCursor
+                            |> Maybe.withDefault Absent
+                    , filter =
+                        Present
+                            { direction =
+                                case direction of
+                                    ASC ->
+                                        Present Cambiatus.Enum.Direction.Asc
+
+                                    DESC ->
+                                        Present Cambiatus.Enum.Direction.Desc
+                            }
+                }
     in
-    Maybe.map (\b -> b :: balancesWithoutSpiral) bespiral
-        |> Maybe.withDefault balancesWithoutSpiral
+    Api.Graphql.query shared
+        (Just authToken)
+        (Cambiatus.Query.claimsAnalysis optionalArguments arg Claim.claimPaginatedSelectionSet)
+        ClaimsLoaded
 
 
-msgToString : Msg -> List String
-msgToString msg =
-    let
-        resultToString ss r =
-            case r of
-                Ok _ ->
-                    ss ++ [ "Ok" ]
+setClaimStatus : List ClaimStatus -> Claim.ClaimId -> (Claim.Model -> ClaimStatus) -> List ClaimStatus
+setClaimStatus claims claimId status =
+    claims
+        |> List.map
+            (\c ->
+                case c of
+                    ClaimLoaded c_ ->
+                        if c_.id == claimId then
+                            status c_
 
-                Err _ ->
-                    ss ++ [ "Err" ]
-    in
-    case msg of
-        GotTime _ ->
-            [ "GotTime" ]
+                        else
+                            c
 
-        CompletedLoadBalances result ->
-            resultToString [ "CompletedLoadBalances" ] result
+                    ClaimLoading c_ ->
+                        if c_.id == claimId then
+                            status c_
 
-        GotDashCommunityMsg index subMsg ->
-            "GotDashCommunityMsg"
-                :: String.fromInt index
-                :: DashCommunity.msgToString subMsg
+                        else
+                            c
 
-        CompletedLoadUserTransfers result ->
-            resultToString [ "CompletedLoadUserTransfers" ] result
+                    _ ->
+                        c
+            )
 
-        CompletedLoadVerifications result ->
-            resultToString [ "CompletedLoadActivities" ] result
 
-        CompletedLoadClaims result ->
-            resultToString [ "CompletedLoadClaims" ] result
+findClaim : List ClaimStatus -> Claim.ClaimId -> Maybe Claim.Model
+findClaim claims claimId =
+    claims
+        |> List.map unwrapClaimStatus
+        |> List.find (\c -> c.id == claimId)
+
+
+unwrapClaimStatus : ClaimStatus -> Claim.Model
+unwrapClaimStatus claimStatus =
+    case claimStatus of
+        ClaimLoaded claim ->
+            claim
+
+        ClaimLoading claim ->
+            claim
+
+        ClaimVoted claim ->
+            claim
+
+        ClaimVoteFailed claim ->
+            claim
+
+
+receiveBroadcast : LoggedIn.BroadcastMsg -> Maybe Msg
+receiveBroadcast broadcastMsg =
+    case broadcastMsg of
+        LoggedIn.CommunityLoaded community ->
+            Just (CompletedLoadCommunity community)
+
+        LoggedIn.ProfileLoaded profile ->
+            Just (CompletedLoadProfile profile)
+
+        _ ->
+            Nothing
 
 
 jsAddressToMsg : List String -> Value -> Maybe Msg
 jsAddressToMsg addr val =
     case addr of
-        "GotDashCommunityMsg" :: indexStr :: remainAddress ->
-            Maybe.map2
-                GotDashCommunityMsg
-                (String.toInt indexStr)
-                (DashCommunity.jsAddressToMsg remainAddress val)
+        "VoteClaim" :: claimId :: _ ->
+            let
+                id =
+                    String.toInt claimId
+                        |> Maybe.withDefault 0
+            in
+            Decode.decodeValue
+                (Decode.oneOf
+                    [ Decode.field "transactionId" Decode.string
+                        |> Decode.map Ok
+                    , Decode.field "error" (Decode.nullable Decode.value)
+                        |> Decode.map Err
+                    ]
+                )
+                val
+                |> Result.map (Just << GotVoteResult id)
+                |> Result.withDefault Nothing
+
+        "CopiedToClipboard" :: _ ->
+            Just CopiedToClipboard
 
         _ ->
             Nothing
+
+
+msgToString : Msg -> List String
+msgToString msg =
+    case msg of
+        NoOp ->
+            [ "NoOp" ]
+
+        CompletedLoadCommunity _ ->
+            [ "CompletedLoadCommunity" ]
+
+        CompletedLoadProfile _ ->
+            [ "CompletedLoadProfile" ]
+
+        CompletedLoadBalance result ->
+            [ "CompletedLoadBalance", UR.resultToString result ]
+
+        CompletedLoadUserTransfers result ->
+            [ "CompletedLoadUserTransfers", UR.remoteDataToString result ]
+
+        ClaimsLoaded result ->
+            [ "ClaimsLoaded", UR.remoteDataToString result ]
+
+        ClaimMsg _ _ ->
+            [ "ClaimMsg" ]
+
+        VoteClaim claimId _ ->
+            [ "VoteClaim", String.fromInt claimId ]
+
+        GotVoteResult _ result ->
+            [ "GotVoteResult", UR.resultToString result ]
+
+        CreateInvite ->
+            [ "CreateInvite" ]
+
+        GotContactMsg _ ->
+            [ "GotContactMsg" ]
+
+        ClosedAddContactModal ->
+            [ "ClosedAddContactModal" ]
+
+        CloseInviteModal ->
+            [ "CloseInviteModal" ]
+
+        CompletedInviteCreation _ ->
+            [ "CompletedInviteCreation" ]
+
+        CopyToClipboard _ ->
+            [ "CopyToClipboard" ]
+
+        CopiedToClipboard ->
+            [ "CopiedToClipboard" ]
+
+        ToggleAnalysisSorting ->
+            [ "ToggleAnalysisSorting" ]

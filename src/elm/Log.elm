@@ -1,4 +1,4 @@
-port module Log exposing (Kind(..), Log, debug, decodeError, graphqlError, graphqlErrorToKind, httpError, impossible, log, map, send)
+port module Log exposing (Kind(..), Log, decodeError, graphqlErrorToKind, impossible, log, map, send)
 
 {-| This is a placeholder API for how we might do logging through
 some service like <http://rollbar.com>.
@@ -100,18 +100,9 @@ send toStrs (Log a) =
                 |> logDebug
 
 
-
---Cmd.none
-
-
 impossible : String -> Cmd msg
 impossible e =
     logError ( "[Impossible Error]", e )
-
-
-debug : String -> Value -> Cmd msg
-debug s a =
-    logDebug ( s, a )
 
 
 decodeError : Decode.Error -> Cmd msg
@@ -129,16 +120,6 @@ httpError httpError_ =
             logError ( "[Http Error: BadPayload]", err )
 
         _ ->
-            Cmd.none
-
-
-graphqlError : Graphql.Http.Error a -> Cmd msg
-graphqlError graphqlError_ =
-    case graphqlError_ of
-        Graphql.Http.HttpError httpError_ ->
-            graphqlHttpError httpError_ ""
-
-        Graphql.Http.GraphqlError _ _ ->
             Cmd.none
 
 

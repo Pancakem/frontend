@@ -19,15 +19,13 @@ import Graphql.SelectionSet exposing (SelectionSet)
 import Json.Decode as Decode
 
 
-{-| A cursor for use in pagination
--}
-cursor : SelectionSet String Cambiatus.Object.TransferEdge
+cursor : SelectionSet (Maybe String) Cambiatus.Object.TransferEdge
 cursor =
-    Object.selectionForField "String" "cursor" [] Decode.string
+    Object.selectionForField "(Maybe String)" "cursor" [] (Decode.string |> Decode.nullable)
 
 
-{-| The item at the end of the edge
--}
-node : SelectionSet decodesTo Cambiatus.Object.Transfer -> SelectionSet (Maybe decodesTo) Cambiatus.Object.TransferEdge
+node :
+    SelectionSet decodesTo Cambiatus.Object.Transfer
+    -> SelectionSet (Maybe decodesTo) Cambiatus.Object.TransferEdge
 node object_ =
     Object.selectionForCompositeField "node" [] object_ (identity >> Decode.nullable)

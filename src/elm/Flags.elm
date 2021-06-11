@@ -4,13 +4,12 @@ module Flags exposing
     , Flags
     , decode
     , default
-    , defaultEndpoints
     )
 
 import Eos
 import Eos.Account as Eos
-import Json.Decode as Decode exposing (Decoder, int, nullable, string)
-import Json.Decode.Pipeline as Decode exposing (optional, required)
+import Json.Decode as Decode exposing (Decoder)
+import Json.Decode.Pipeline as DecodePipeline exposing (optional, required)
 
 
 type alias Flags =
@@ -22,6 +21,13 @@ type alias Flags =
     , logoMobile : String
     , now : Int
     , allowCommunityCreation : Bool
+    , tokenContract : String
+    , communityContract : String
+    , graphqlSecret : String
+    , authToken : Maybe String
+    , canReadClipboard : Bool
+    , useSubdomain : Bool
+    , selectedCommunity : Maybe Eos.Symbol
     }
 
 
@@ -35,6 +41,13 @@ default =
     , logoMobile = "/images/logo-cambiatus-mobile.svg"
     , now = 0
     , allowCommunityCreation = True
+    , tokenContract = "bes.token"
+    , communityContract = "bes.cmm"
+    , graphqlSecret = ""
+    , authToken = Nothing
+    , canReadClipboard = False
+    , useSubdomain = True
+    , selectedCommunity = Nothing
     }
 
 
@@ -42,13 +55,13 @@ decode : Decoder Flags
 decode =
     Decode.succeed Flags
         |> required "env" decodeEnvironment
-        |> required "language" string
-        |> Decode.custom
+        |> required "language" Decode.string
+        |> DecodePipeline.custom
             (Decode.succeed
                 (Maybe.map2 (\acc auth -> ( acc, auth )))
-                |> optional "accountName" (nullable Eos.nameDecoder) Nothing
+                |> optional "accountName" (Decode.nullable Eos.nameDecoder) Nothing
                 |> optional "isPinAvailable"
-                    (nullable Decode.bool)
+                    (Decode.nullable Decode.bool)
                     Nothing
             )
         |> required "endpoints" decodeEndpoints
@@ -56,14 +69,19 @@ decode =
         |> required "logoMobile" Decode.string
         |> required "now" Decode.int
         |> required "allowCommunityCreation" Decode.bool
+        |> required "tokenContract" Decode.string
+        |> required "communityContract" Decode.string
+        |> required "graphqlSecret" Decode.string
+        |> required "authToken" (Decode.nullable Decode.string)
+        |> required "canReadClipboard" Decode.bool
+        |> required "useSubdomain" Decode.bool
+        |> required "selectedCommunity" (Decode.nullable Eos.symbolDecoder)
 
 
 type alias Endpoints =
     { eosio : String
     , api : String
-    , chat : String
     , graphql : String
-    , ipfs : String
     }
 
 
@@ -71,20 +89,16 @@ defaultEndpoints : Endpoints
 defaultEndpoints =
     { eosio = "https://eosio.cambiatus.io"
     , api = "https://api.cambiatus.io"
-    , chat = "https://app.cambiatus.io/chat"
     , graphql = "https://api.cambiatus.io/api/graph"
-    , ipfs = "https://ipfs.cambiatus.io/ipfs"
     }
 
 
 decodeEndpoints : Decoder Endpoints
 decodeEndpoints =
     Decode.succeed Endpoints
-        |> required "eosio" string
-        |> required "api" string
-        |> required "chat" string
-        |> required "graphql" string
-        |> required "ipfs" string
+        |> required "eosio" Decode.string
+        |> required "api" Decode.string
+        |> required "graphql" Decode.string
 
 
 type Environment
@@ -102,4 +116,4 @@ decodeEnvironment =
             else
                 Production
         )
-        string
+        Decode.string

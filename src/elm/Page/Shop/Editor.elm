@@ -1,28 +1,44 @@
-module Page.Shop.Editor exposing (Model, Msg(..), initCreate, initUpdate, jsAddressToMsg, msgToString, subscriptions, update, view)
+module Page.Shop.Editor exposing
+    ( Model
+    , Msg(..)
+    , initCreate
+    , initUpdate
+    , jsAddressToMsg
+    , msgToString
+    , subscriptions
+    , update
+    , view
+    )
 
 import Api
 import Api.Graphql
-import Asset.Icon as Icon
+import Browser.Events as Events
 import Community exposing (Balance)
-import DataValidator exposing (Validator, getInput, greaterThanOrEqual, hasErrors, listErrors, longerThan, newValidator, oneOf, updateInput, validate)
+import DataValidator exposing (Validator, getInput, greaterThanOrEqual, hasErrors, listErrors, longerThan, lowerThanOrEqual, newValidator, oneOf, updateInput, validate)
 import Eos exposing (Symbol)
 import Eos.Account as Eos
 import File exposing (File)
 import Graphql.Http
-import Html exposing (Attribute, Html, button, div, h3, input, label, option, select, span, text, textarea)
-import Html.Attributes exposing (accept, attribute, class, disabled, for, hidden, id, maxlength, multiple, required, selected, style, type_, value)
-import Html.Events exposing (keyCode, on, onClick, onInput)
+import Html exposing (Html, button, div, p, span, text)
+import Html.Attributes exposing (class, disabled, id, maxlength, required, rows, value)
+import Html.Events exposing (onClick)
 import Http
-import I18Next
 import Json.Decode as Decode
 import Json.Encode as Encode exposing (Value)
 import Page
+import RemoteData exposing (RemoteData)
 import Result exposing (Result)
 import Route
 import Session.LoggedIn as LoggedIn exposing (External(..))
-import Session.Shared exposing (Shared)
-import Shop exposing (Sale, SaleId)
+import Shop exposing (Product, ProductId)
+import Task
 import UpdateResult as UR
+import Utils exposing (decodeEnterKeyDown)
+import View.Feedback as Feedback
+import View.Form.FileUploader as FileUploader
+import View.Form.Input as Input
+import View.Form.Select as Select
+import View.Modal as Modal
 
 
 
@@ -31,16 +47,14 @@ import UpdateResult as UR
 
 initCreate : LoggedIn.Model -> ( Model, Cmd Msg )
 initCreate loggedIn =
-    ( { status = LoadingBalancesCreate
-      }
+    ( LoadingBalancesCreate
     , Api.getBalances loggedIn.shared loggedIn.accountName CompletedBalancesLoad
     )
 
 
-initUpdate : SaleId -> LoggedIn.Model -> ( Model, Cmd Msg )
-initUpdate saleId loggedIn =
-    ( { status = LoadingBalancesUpdate saleId
-      }
+initUpdate : ProductId -> LoggedIn.Model -> ( Model, Cmd Msg )
+initUpdate productId loggedIn =
+    ( LoadingBalancesUpdate productId
     , Api.getBalances loggedIn.shared loggedIn.accountName CompletedBalancesLoad
     )
 
@@ -51,7 +65,7 @@ initUpdate saleId loggedIn =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    Sub.none
+    Sub.map PressedEnter (Events.onKeyDown decodeEnterKeyDown)
 
 
 
@@ -59,8 +73,7 @@ subscriptions _ =
 
 
 type alias Model =
-    { status : Status
-    }
+    Status
 
 
 type
@@ -70,32 +83,33 @@ type
     | EditingCreate (List Balance) ImageStatus Form
     | Creating (List Balance) ImageStatus Form
       -- Update
-    | LoadingBalancesUpdate SaleId
-    | LoadingSaleUpdate (List Balance) SaleId
-    | EditingUpdate (List Balance) Sale ImageStatus Form
-    | Saving (List Balance) Sale ImageStatus Form
-    | Deleting (List Balance) Sale ImageStatus Form
+    | LoadingBalancesUpdate ProductId
+    | LoadingSaleUpdate (List Balance)
+    | EditingUpdate (List Balance) Product ImageStatus DeleteModalStatus Form
+    | Saving (List Balance) Product ImageStatus Form
+    | Deleting (List Balance) Product ImageStatus Form
       -- Errors
     | LoadBalancesFailed Http.Error
-    | LoadSaleFailed (Graphql.Http.Error (Maybe Sale))
+    | LoadSaleFailed (Graphql.Http.Error (Maybe Product))
+
+
+type DeleteModalStatus
+    = Open
+    | Closed
 
 
 type alias FormError =
     Maybe String
 
 
-type ImageStatus
-    = NoImage
-    | Uploading
-    | UploadFailed Http.Error
-    | Uploaded String
+type alias ImageStatus =
+    RemoteData Http.Error String
 
 
 type alias Form =
     { image : Validator (Maybe String)
     , title : Validator String
     , description : Validator String
-    , symbol : Validator (Maybe Symbol)
     , trackStock : Validator (Maybe String)
     , units : Validator String
     , price : Validator String
@@ -113,24 +127,21 @@ trackNo =
     "no"
 
 
-initForm : List String -> Form
-initForm balanceOptions =
+initForm : Form
+initForm =
     let
         image =
             newValidator Nothing identity False []
 
         title =
-            newValidator "" (\v -> Just v) True []
+            []
+                |> longerThan 3
+                |> newValidator "" (\v -> Just v) True
 
         description =
             []
                 |> longerThan 10
                 |> newValidator "" (\v -> Just v) True
-
-        symbol =
-            []
-                |> oneOf balanceOptions
-                |> newValidator Nothing (Maybe.map Eos.symbolToString) True
 
         trackStock =
             []
@@ -140,6 +151,7 @@ initForm balanceOptions =
         units =
             []
                 |> greaterThanOrEqual 0
+                |> lowerThanOrEqual 2000
                 |> newValidator "0" (\v -> Just v) False
 
         price =
@@ -150,7 +162,6 @@ initForm balanceOptions =
     { image = image
     , title = title
     , description = description
-    , symbol = symbol
     , trackStock = trackStock
     , units = units
     , price = price
@@ -162,84 +173,98 @@ initForm balanceOptions =
 -- VIEW
 
 
-view : LoggedIn.Model -> Model -> Html Msg
+view : LoggedIn.Model -> Model -> { title : String, content : Html Msg }
 view loggedIn model =
     let
         shared =
             loggedIn.shared
 
         t =
-            I18Next.t shared.translations
+            shared.translators.t
+
+        isEdit =
+            case model of
+                EditingUpdate _ _ _ _ _ ->
+                    True
+
+                Saving _ _ _ _ ->
+                    True
+
+                Deleting _ _ _ _ ->
+                    True
+
+                _ ->
+                    False
+
+        title =
+            if isEdit then
+                t "shop.edit_offer"
+
+            else
+                t "shop.create_offer"
+
+        content =
+            case model of
+                LoadingBalancesCreate ->
+                    Page.fullPageLoading shared
+
+                LoadingBalancesUpdate _ ->
+                    Page.fullPageLoading shared
+
+                LoadingSaleUpdate _ ->
+                    Page.fullPageLoading shared
+
+                LoadBalancesFailed error ->
+                    Page.fullPageError (t "shop.title") error
+
+                LoadSaleFailed error ->
+                    Page.fullPageGraphQLError (t "shop.title") error
+
+                EditingCreate _ imageStatus form ->
+                    viewForm loggedIn imageStatus False False Closed form
+
+                Creating _ imageStatus form ->
+                    viewForm loggedIn imageStatus False True Closed form
+
+                EditingUpdate _ _ imageStatus confirmDelete form ->
+                    viewForm loggedIn imageStatus True False confirmDelete form
+
+                Saving _ _ imageStatus form ->
+                    viewForm loggedIn imageStatus True True Closed form
+
+                Deleting _ _ imageStatus form ->
+                    viewForm loggedIn imageStatus True True Closed form
     in
-    case model.status of
-        LoadingBalancesCreate ->
-            Page.fullPageLoading
+    { title = title
+    , content =
+        case RemoteData.map .hasShop loggedIn.selectedCommunity of
+            RemoteData.Success True ->
+                content
 
-        LoadingBalancesUpdate _ ->
-            Page.fullPageLoading
+            RemoteData.Success False ->
+                Page.fullPageNotFound
+                    (t "error.pageNotFound")
+                    (t "shop.disabled.description")
 
-        LoadingSaleUpdate _ _ ->
-            Page.fullPageLoading
+            RemoteData.Loading ->
+                Page.fullPageLoading shared
 
-        LoadBalancesFailed error ->
-            Page.fullPageError (t "shop.title") error
+            RemoteData.NotAsked ->
+                Page.fullPageLoading shared
 
-        LoadSaleFailed error ->
-            Page.fullPageGraphQLError (t "shop.title") error
-
-        EditingCreate balances imageStatus form ->
-            viewForm shared balances imageStatus False False form
-
-        Creating balances imageStatus form ->
-            viewForm shared balances imageStatus False True form
-
-        EditingUpdate balances _ imageStatus form ->
-            viewForm shared balances imageStatus True False form
-
-        Saving balances _ imageStatus form ->
-            viewForm shared balances imageStatus True True form
-
-        Deleting balances _ imageStatus form ->
-            viewForm shared balances imageStatus True True form
+            RemoteData.Failure e ->
+                Page.fullPageGraphQLError (t "community.error_loading") e
+    }
 
 
-viewForm : Shared -> List Balance -> ImageStatus -> Bool -> Bool -> Form -> Html Msg
-viewForm shared balances imageStatus isEdit isDisabled form =
+viewForm : LoggedIn.Model -> ImageStatus -> Bool -> Bool -> DeleteModalStatus -> Form -> Html Msg
+viewForm ({ shared } as loggedIn) imageStatus isEdit isDisabled deleteModal form =
     let
-        ipfsUrl =
-            shared.endpoints.ipfs
-
         t =
-            I18Next.t shared.translations
+            shared.translators.t
 
         fieldId s =
             "shop-editor-" ++ s
-
-        imageStyle =
-            case getInput form.image of
-                Just hash ->
-                    style "background-image" ("url(" ++ ipfsUrl ++ "/" ++ hash ++ ")")
-
-                Nothing ->
-                    style "" ""
-
-        imageView =
-            case imageStatus of
-                Uploading ->
-                    [ div
-                        [ class "spinner" ]
-                        []
-                    ]
-
-                _ ->
-                    [ Icon.addPhoto ""
-                    , span
-                        []
-                        [ text (t "shop.photo_label") ]
-                    ]
-
-        symbol =
-            getInput form.symbol
 
         trackStock =
             getInput form.trackStock
@@ -251,184 +276,113 @@ viewForm shared balances imageStatus isEdit isDisabled form =
             else
                 ( t "menu.create", t "shop.create_offer" )
     in
-    div
-        [ class "container mx-auto px-4 py-2" ]
-        [ div
-            [ class "bg-white rounded-lg" ]
-            [ div [ class "px-4 py-6 border-b border-gray-500" ]
-                [ div [ class "text-heading font-medium" ] [ text pageTitle ]
-                , case isEdit of
-                    True ->
-                        button
-                            [ class "btn delete-button"
-                            , disabled isDisabled
-                            , onClick ClickedDelete
-                            ]
-                            [ text (t "DELETE") ]
-
-                    False ->
-                        text ""
-                ]
-            , div
-                [ class "shop-editor__image-upload w-full " ]
-                [ input
-                    [ id (fieldId "image")
-                    , class "hidden-img-input"
-                    , type_ "file"
-                    , accept "image/*"
-                    , Page.onFileChange EnteredImage
-                    , multiple False
-                    , disabled isDisabled
-                    ]
-                    []
-                , label
-                    [ for (fieldId "image")
-                    , imageStyle
-                    ]
-                    imageView
-                ]
-            , div [ class "px-4 py-6 flex flex-col" ]
-                [ formField
-                    [ div
-                        [ class "input-label" ]
-                        [ text (t "shop.what_label") ]
-                    , viewFieldErrors (listErrors shared.translations form.title)
-                    , input
-                        [ class "input w-full"
-                        , type_ "text"
-                        , id (fieldId "title")
-                        , value (getInput form.title)
-                        , maxlength 255
-                        , onInput EnteredTitle
-                        , required True
+    div [ class "bg-white" ]
+        [ Page.viewHeader loggedIn pageTitle
+        , div
+            [ class "container mx-auto" ]
+            [ div [ class "px-4 py-6" ]
+                [ if isEdit then
+                    button
+                        [ class "btn delete-button"
                         , disabled isDisabled
+                        , onClick ClickedDelete
                         ]
-                        []
-                    ]
-                , formField
-                    [ div
-                        [ class "input-label" ]
-                        [ text (t "shop.description_label") ]
-                    , viewFieldErrors (listErrors shared.translations form.description)
-                    , textarea
-                        [ class "input w-full"
-                        , id (fieldId "description")
-                        , value (getInput form.description)
-                        , maxlength 255
-                        , onInput EnteredDescription
-                        , required True
-                        , disabled isDisabled
-                        ]
-                        []
-                    ]
-                , div [ class "mt-2" ]
-                    [ formField
-                        [ label
-                            [ class "input-label" ]
-                            [ text (t "shop.which_community_label") ]
-                        , viewFieldErrors (listErrors shared.translations form.symbol)
-                        , select
-                            [ class "input w-full mb-2 form-select select"
-                            , id (fieldId "symbol")
-                            , required True
-                            , disabled (isEdit || isDisabled)
-                            , Html.Events.on "change"
-                                (Decode.map
-                                    (\symbolStr ->
-                                        if String.isEmpty symbolStr then
-                                            EnteredSymbol Nothing
+                        [ text (t "shop.delete") ]
 
-                                        else
-                                            EnteredSymbol (Just symbolStr)
-                                    )
-                                    Html.Events.targetValue
-                                )
-                            ]
-                            (option
-                                [ hidden True
-                                , attribute "value" ""
-                                , selected (symbol == Nothing)
-                                ]
-                                [ text (t "shop.choose_community_label") ]
-                                :: List.map
-                                    (\b ->
-                                        option
-                                            [ value (Eos.symbolToString b.asset.symbol)
-                                            , selected (symbol == Just b.asset.symbol)
-                                            ]
-                                            [ text (Eos.symbolToString b.asset.symbol) ]
-                                    )
-                                    balances
-                            )
-                        ]
-                    ]
-                , div [ class "mt-2" ]
-                    [ formField
-                        [ div
-                            [ class "input-label" ]
-                            [ text (t "shop.track_stock_label") ]
-                        , viewFieldErrors (listErrors shared.translations form.trackStock)
-                        , select
-                            [ class "form-select select w-1/2"
-                            , id (fieldId "trackStock")
-                            , required True
-                            , disabled isDisabled
-                            , on "change"
-                                (Decode.map EnteredTrackStock Html.Events.targetValue)
-                            ]
-                            [ option
-                                [ value trackYes
-                                , selected (trackStock == Just trackYes)
-                                ]
-                                [ text (t "shop.track_stock_yes") ]
-                            , option
-                                [ value trackNo
-                                , selected (trackStock == Just trackNo)
-                                ]
-                                [ text (t "shop.track_stock_no") ]
-                            ]
-                        ]
-                    , if trackStock == Just trackYes then
-                        formField
-                            [ div
-                                [ class "input-label" ]
-                                [ text (t "shop.units_label") ]
-                            , viewFieldErrors (listErrors shared.translations form.units)
-                            , input
-                                [ class "input w-full"
-                                , type_ "number"
-                                , id (fieldId "units")
-                                , value (getInput form.units)
-                                , onInput EnteredUnits
-                                , required True
-                                , disabled isDisabled
-                                , Html.Attributes.min "0"
-                                ]
-                                []
-                            ]
+                  else
+                    text ""
+                , if isEdit && deleteModal == Open then
+                    viewConfirmDeleteModal t
 
-                      else
-                        text ""
-                    ]
-                , div
-                    [ class "mt-2" ]
-                    [ formField
-                        [ span
-                            [ class "input-label" ]
-                            [ text (t "shop.price_label") ]
-                        , viewFieldErrors (listErrors shared.translations form.price)
-                        , input
-                            [ class "input w-full"
-                            , id (fieldId "price")
-                            , value (getInput form.price)
-                            , onInput EnteredPrice
-                            , required True
-                            , disabled isDisabled
-                            , Html.Attributes.min "0"
-                            ]
-                            []
-                        ]
-                    ]
+                  else
+                    text ""
+                ]
+            , FileUploader.init
+                { label = ""
+                , id = fieldId "image"
+                , onFileInput = EnteredImage
+                , status = imageStatus
+                }
+                |> FileUploader.withBackground FileUploader.Gray
+                |> FileUploader.withAttrs [ class "px-4 mb-10" ]
+                |> FileUploader.toHtml shared.translators
+            , div [ class "px-4 flex flex-col" ]
+                [ Input.init
+                    { label = t "shop.what_label"
+                    , id = fieldId "title"
+                    , onInput = EnteredTitle
+                    , disabled = isDisabled
+                    , value = getInput form.title
+                    , placeholder = Nothing
+                    , problems = listErrors shared.translations form.title |> Just
+                    , translators = shared.translators
+                    }
+                    |> Input.withAttrs [ maxlength 255, required True ]
+                    |> Input.toHtml
+                , Input.init
+                    { label = t "shop.description_label"
+                    , id = fieldId "description"
+                    , onInput = EnteredDescription
+                    , disabled = isDisabled
+                    , value = getInput form.description
+                    , placeholder = Nothing
+                    , problems = listErrors shared.translations form.description |> Just
+                    , translators = shared.translators
+                    }
+                    |> Input.withAttrs [ maxlength 255, required True, rows 5 ]
+                    |> Input.withCounter 255
+                    |> Input.withInputType Input.TextArea
+                    |> Input.toHtml
+                , Select.init
+                    { id = fieldId "trackStock"
+                    , label = t "shop.track_stock_label"
+                    , onInput = EnteredTrackStock
+                    , firstOption = { value = trackNo, label = t "shop.track_stock_no" }
+                    , value = trackStock |> Maybe.withDefault trackNo
+                    , valueToString = identity
+                    , disabled = isDisabled
+                    , problems = listErrors shared.translations form.trackStock |> Just
+                    }
+                    |> Select.withOption { value = trackYes, label = t "shop.track_stock_yes" }
+                    |> Select.withAttrs [ required True ]
+                    |> Select.toHtml
+                , if trackStock == Just trackYes then
+                    Input.init
+                        { label = t "shop.units_label"
+                        , id = fieldId "units"
+                        , onInput = EnteredUnits
+                        , disabled = isDisabled
+                        , value = getInput form.units
+                        , placeholder = Nothing
+                        , problems = listErrors shared.translations form.units |> Just
+                        , translators = shared.translators
+                        }
+                        |> Input.asNumeric
+                        |> Input.withType Input.Number
+                        |> Input.withAttrs [ required True, Html.Attributes.min "0", Html.Attributes.max "2000" ]
+                        |> Input.toHtml
+
+                  else
+                    text ""
+                , Input.init
+                    { label = t "shop.price_label"
+                    , id = fieldId "price"
+                    , onInput = EnteredPrice
+                    , disabled = isDisabled
+                    , value = getInput form.price
+                    , placeholder = Nothing
+                    , problems = listErrors shared.translations form.price |> Just
+                    , translators = shared.translators
+                    }
+                    |> (case loggedIn.selectedCommunity of
+                            RemoteData.Success community ->
+                                Input.withCurrency community.symbol
+
+                            _ ->
+                                identity
+                       )
+                    |> Input.withAttrs [ required True, Html.Attributes.min "0" ]
+                    |> Input.toHtml
                 , case form.error of
                     Nothing ->
                         text ""
@@ -436,11 +390,11 @@ viewForm shared balances imageStatus isEdit isDisabled form =
                     Just err ->
                         viewFieldErrors [ err ]
                 , div
-                    [ class "flex align-center justify-center mt-6"
-                    , disabled (isDisabled || imageStatus == Uploading)
+                    [ class "flex align-center justify-center mb-10"
+                    , disabled (isDisabled || RemoteData.isLoading imageStatus)
                     ]
                     [ button
-                        [ class "button button-primary"
+                        [ class "button button-primary w-full sm:w-40"
                         , onClick ClickedSave
                         ]
                         [ text actionText ]
@@ -450,9 +404,28 @@ viewForm shared balances imageStatus isEdit isDisabled form =
         ]
 
 
-formField : List (Html msg) -> Html msg
-formField =
-    div [ class "mb-2" ]
+viewConfirmDeleteModal : (String -> String) -> Html Msg
+viewConfirmDeleteModal t =
+    Modal.initWith
+        { closeMsg = ClickedDeleteCancel
+        , isVisible = True
+        }
+        |> Modal.withHeader (t "shop.delete_modal.title")
+        |> Modal.withBody
+            [ text (t "shop.delete_modal.body") ]
+        |> Modal.withFooter
+            [ button
+                [ class "modal-cancel"
+                , onClick ClickedDeleteCancel
+                ]
+                [ text (t "shop.delete_modal.cancel") ]
+            , button
+                [ class "modal-accept"
+                , onClick ClickedDeleteConfirm
+                ]
+                [ text (t "shop.delete_modal.confirm") ]
+            ]
+        |> Modal.toHtml
 
 
 viewFieldErrors : List String -> Html msg
@@ -460,21 +433,12 @@ viewFieldErrors errors =
     let
         viewErrors =
             List.map
-                (\error ->
-                    span
-                        [ class "field-error" ]
-                        [ text error ]
-                )
+                (\error -> span [ class "form-error" ] [ text error ])
                 errors
     in
     div
-        [ class "form-field-error" ]
+        [ class "form-error" ]
         viewErrors
-
-
-onKeyDown : (Int -> msg) -> Attribute msg
-onKeyDown toMsg =
-    on "keydown" (Decode.map toMsg keyCode)
 
 
 
@@ -487,37 +451,34 @@ type alias UpdateResult =
 
 type Msg
     = CompletedBalancesLoad (Result Http.Error (List Balance))
-    | CompletedSaleLoad (Result (Graphql.Http.Error (Maybe Sale)) (Maybe Sale))
+    | CompletedSaleLoad (RemoteData (Graphql.Http.Error (Maybe Product)) (Maybe Product))
     | CompletedImageUpload (Result Http.Error String)
     | EnteredImage (List File)
     | EnteredTitle String
     | EnteredDescription String
-    | EnteredSymbol (Maybe String)
     | EnteredTrackStock String
     | EnteredUnits String
     | EnteredPrice String
     | ClickedSave
     | ClickedDelete
+    | ClickedDeleteConfirm
+    | ClickedDeleteCancel
     | GotSaveResponse (Result Value String)
     | GotDeleteResponse (Result Value String)
+    | PressedEnter Bool
 
 
 update : Msg -> Model -> LoggedIn.Model -> UpdateResult
 update msg model loggedIn =
+    let
+        t =
+            loggedIn.shared.translators.t
+    in
     case msg of
         CompletedBalancesLoad (Ok balances) ->
-            case model.status of
+            case model of
                 LoadingBalancesCreate ->
-                    let
-                        balanceOptions =
-                            List.map
-                                (\balance ->
-                                    Eos.symbolToString balance.asset.symbol
-                                )
-                                balances
-                    in
-                    model
-                        |> updateStatus (EditingCreate balances NoImage (initForm balanceOptions))
+                    EditingCreate balances RemoteData.NotAsked initForm
                         |> UR.init
 
                 LoadingBalancesUpdate saleId ->
@@ -528,10 +489,12 @@ update msg model loggedIn =
                                     Cmd.none
 
                                 Just id ->
-                                    Api.Graphql.query loggedIn.shared (Shop.saleQuery id) CompletedSaleLoad
+                                    Api.Graphql.query loggedIn.shared
+                                        (Just loggedIn.authToken)
+                                        (Shop.productQuery id)
+                                        CompletedSaleLoad
                     in
-                    model
-                        |> updateStatus (LoadingSaleUpdate balances saleId)
+                    LoadingSaleUpdate balances
                         |> UR.init
                         |> UR.addCmd saleFetch
 
@@ -541,22 +504,14 @@ update msg model loggedIn =
                         |> UR.logImpossible msg []
 
         CompletedBalancesLoad (Err error) ->
-            model
-                |> updateStatus (LoadBalancesFailed error)
+            LoadBalancesFailed error
                 |> UR.init
                 |> UR.logHttpError msg error
 
-        CompletedSaleLoad (Ok maybeSale) ->
-            case ( model.status, maybeSale ) of
-                ( LoadingSaleUpdate balances _, Just sale ) ->
+        CompletedSaleLoad (RemoteData.Success maybeSale) ->
+            case ( model, maybeSale ) of
+                ( LoadingSaleUpdate balances, Just sale ) ->
                     let
-                        balanceOptions =
-                            List.map
-                                (\balance ->
-                                    Eos.symbolToString balance.asset.symbol
-                                )
-                                balances
-
                         trackStock =
                             if sale.trackStock then
                                 trackYes
@@ -564,15 +519,13 @@ update msg model loggedIn =
                             else
                                 trackNo
                     in
-                    model
-                        |> updateStatus (EditingUpdate balances sale NoImage (initForm balanceOptions))
+                    EditingUpdate balances sale RemoteData.NotAsked Closed initForm
                         |> updateForm
                             (\form ->
                                 { form
                                     | image = updateInput sale.image form.image
                                     , title = updateInput sale.title form.title
                                     , description = updateInput sale.description form.description
-                                    , symbol = updateInput (Just sale.symbol) form.symbol
                                     , trackStock = updateInput (Just trackStock) form.trackStock
                                     , units = updateInput (String.fromInt sale.units) form.units
                                     , price = updateInput (String.fromFloat sale.price) form.price
@@ -585,29 +538,29 @@ update msg model loggedIn =
                         |> UR.init
                         |> UR.logImpossible msg []
 
-        CompletedSaleLoad (Err error) ->
-            model
-                |> updateStatus (LoadSaleFailed error)
+        CompletedSaleLoad (RemoteData.Failure error) ->
+            LoadSaleFailed error
                 |> UR.init
                 |> UR.logGraphqlError msg error
 
-        CompletedImageUpload (Ok hash) ->
-            case model.status of
+        CompletedSaleLoad _ ->
+            UR.init model
+
+        CompletedImageUpload (Ok url) ->
+            case model of
                 EditingCreate balances _ form ->
-                    model
-                        |> updateStatus (EditingCreate balances (Uploaded hash) form)
+                    EditingCreate balances (RemoteData.Success url) form
                         |> updateForm
                             (\form_ ->
-                                { form_ | image = updateInput (Just hash) form_.image }
+                                { form_ | image = updateInput (Just url) form_.image }
                             )
                         |> UR.init
 
-                EditingUpdate balances sale _ form ->
-                    model
-                        |> updateStatus (EditingUpdate balances sale (Uploaded hash) form)
+                EditingUpdate balances sale _ _ form ->
+                    EditingUpdate balances sale (RemoteData.Success url) Closed form
                         |> updateForm
                             (\form_ ->
-                                { form_ | image = updateInput (Just hash) form_.image }
+                                { form_ | image = updateInput (Just url) form_.image }
                             )
                         |> UR.init
 
@@ -617,39 +570,38 @@ update msg model loggedIn =
                         |> UR.logImpossible msg []
 
         CompletedImageUpload (Err error) ->
-            case model.status of
+            case model of
                 EditingCreate balances _ form ->
-                    model
-                        |> updateStatus (EditingCreate balances (UploadFailed error) form)
+                    EditingCreate balances (RemoteData.Failure error) form
                         |> UR.init
                         |> UR.logHttpError msg error
+                        |> UR.addExt (LoggedIn.ShowFeedback Feedback.Failure (t "error.invalid_image_file"))
 
-                EditingUpdate balances sale _ form ->
-                    model
-                        |> updateStatus (EditingUpdate balances sale (UploadFailed error) form)
+                EditingUpdate balances sale _ _ form ->
+                    EditingUpdate balances sale (RemoteData.Failure error) Closed form
                         |> UR.init
                         |> UR.logHttpError msg error
+                        |> UR.addExt (LoggedIn.ShowFeedback Feedback.Failure (t "error.invalid_image_file"))
 
                 _ ->
                     model
                         |> UR.init
                         |> UR.logHttpError msg error
+                        |> UR.addExt (LoggedIn.ShowFeedback Feedback.Failure (t "error.invalid_image_file"))
 
         EnteredImage (file :: _) ->
             let
                 uploadImage =
                     Api.uploadImage loggedIn.shared file CompletedImageUpload
             in
-            case model.status of
+            case model of
                 EditingCreate balances _ form ->
-                    model
-                        |> updateStatus (EditingCreate balances Uploading form)
+                    EditingCreate balances RemoteData.Loading form
                         |> UR.init
                         |> UR.addCmd uploadImage
 
-                EditingUpdate balances sale _ form ->
-                    model
-                        |> updateStatus (EditingUpdate balances sale Uploading form)
+                EditingUpdate balances sale _ _ form ->
+                    EditingUpdate balances sale RemoteData.Loading Closed form
                         |> UR.init
                         |> UR.addCmd uploadImage
 
@@ -671,26 +623,16 @@ update msg model loggedIn =
                 |> UR.init
 
         EnteredDescription description ->
-            model
-                |> updateForm
-                    (\form ->
-                        { form | description = updateInput description form.description }
-                    )
-                |> UR.init
+            if String.length description > 255 then
+                UR.init model
 
-        EnteredSymbol symbolStr ->
-            let
-                maybeSymbol =
-                    Maybe.andThen
-                        Eos.symbolFromString
-                        symbolStr
-            in
-            model
-                |> updateForm
-                    (\form ->
-                        { form | symbol = updateInput maybeSymbol form.symbol }
-                    )
-                |> UR.init
+            else
+                model
+                    |> updateForm
+                        (\form ->
+                            { form | description = updateInput description form.description }
+                        )
+                    |> UR.init
 
         EnteredTrackStock trackStock ->
             model
@@ -701,36 +643,51 @@ update msg model loggedIn =
                 |> UR.init
 
         EnteredUnits units ->
+            let
+                trimmedUnits =
+                    if String.length units > 4 then
+                        String.left 4 units
+
+                    else
+                        units
+            in
             model
                 |> updateForm
                     (\form ->
-                        { form | units = updateInput units form.units }
+                        { form | units = updateInput trimmedUnits form.units }
                     )
                 |> UR.init
 
         EnteredPrice value ->
+            let
+                trimmedPrice =
+                    if String.length value > 12 then
+                        String.left 12 value
+
+                    else
+                        value
+            in
             model
                 |> updateForm
                     (\form ->
-                        { form | price = updateInput (getNumericValues value) form.price }
+                        { form | price = updateInput (getNumericValues trimmedPrice) form.price }
                     )
                 |> UR.init
 
         ClickedSave ->
-            if LoggedIn.isAuth loggedIn then
+            if LoggedIn.hasPrivateKey loggedIn then
                 let
                     validatedModel =
                         model
                             |> updateForm validateForm
                 in
-                case validatedModel.status of
-                    EditingCreate balances (Uploaded hash) form ->
+                case validatedModel of
+                    EditingCreate balances (RemoteData.Success url) form ->
                         if isValidForm form then
                             performRequest
                                 ClickedSave
-                                validatedModel
-                                (Creating balances (Uploaded hash) form)
-                                loggedIn.accountName
+                                (Creating balances (RemoteData.Success url) form)
+                                loggedIn
                                 "createsale"
                                 (encodeCreateForm loggedIn form)
 
@@ -738,13 +695,12 @@ update msg model loggedIn =
                             validatedModel
                                 |> UR.init
 
-                    EditingCreate balances (UploadFailed error) form ->
+                    EditingCreate balances (RemoteData.Failure error) form ->
                         if isValidForm form then
                             performRequest
                                 ClickedSave
-                                validatedModel
-                                (Creating balances (UploadFailed error) form)
-                                loggedIn.accountName
+                                (Creating balances (RemoteData.Failure error) form)
+                                loggedIn
                                 "createsale"
                                 (encodeCreateForm loggedIn form)
 
@@ -752,13 +708,12 @@ update msg model loggedIn =
                             validatedModel
                                 |> UR.init
 
-                    EditingCreate balances NoImage form ->
+                    EditingCreate balances RemoteData.NotAsked form ->
                         if isValidForm form then
                             performRequest
                                 ClickedSave
-                                validatedModel
-                                (Creating balances NoImage form)
-                                loggedIn.accountName
+                                (Creating balances RemoteData.NotAsked form)
+                                loggedIn
                                 "createsale"
                                 (encodeCreateForm loggedIn form)
 
@@ -766,47 +721,59 @@ update msg model loggedIn =
                             validatedModel
                                 |> UR.init
 
-                    EditingUpdate balances sale (Uploaded hash) form ->
-                        if isValidForm form then
-                            performRequest
-                                ClickedSave
-                                validatedModel
-                                (Saving balances sale (Uploaded hash) form)
-                                loggedIn.accountName
-                                "updatesale"
-                                (encodeUpdateForm sale form)
+                    EditingUpdate balances sale (RemoteData.Success url) _ form ->
+                        case loggedIn.selectedCommunity of
+                            RemoteData.Success community ->
+                                if isValidForm form then
+                                    performRequest
+                                        ClickedSave
+                                        (Saving balances sale (RemoteData.Success url) form)
+                                        loggedIn
+                                        "updatesale"
+                                        (encodeUpdateForm sale form community.symbol)
 
-                        else
-                            validatedModel
-                                |> UR.init
+                                else
+                                    validatedModel
+                                        |> UR.init
 
-                    EditingUpdate balances sale (UploadFailed error) form ->
-                        if isValidForm form then
-                            performRequest
-                                ClickedSave
-                                validatedModel
-                                (Saving balances sale (UploadFailed error) form)
-                                loggedIn.accountName
-                                "updatesale"
-                                (encodeUpdateForm sale form)
+                            _ ->
+                                validatedModel |> UR.init
 
-                        else
-                            validatedModel
-                                |> UR.init
+                    EditingUpdate balances sale (RemoteData.Failure error) _ form ->
+                        case loggedIn.selectedCommunity of
+                            RemoteData.Success community ->
+                                if isValidForm form then
+                                    performRequest
+                                        ClickedSave
+                                        (Saving balances sale (RemoteData.Failure error) form)
+                                        loggedIn
+                                        "updatesale"
+                                        (encodeUpdateForm sale form community.symbol)
 
-                    EditingUpdate balances sale NoImage form ->
-                        if isValidForm form then
-                            performRequest
-                                ClickedSave
-                                validatedModel
-                                (Saving balances sale NoImage form)
-                                loggedIn.accountName
-                                "updatesale"
-                                (encodeUpdateForm sale form)
+                                else
+                                    validatedModel
+                                        |> UR.init
 
-                        else
-                            validatedModel
-                                |> UR.init
+                            _ ->
+                                validatedModel |> UR.init
+
+                    EditingUpdate balances sale RemoteData.NotAsked _ form ->
+                        case loggedIn.selectedCommunity of
+                            RemoteData.Success community ->
+                                if isValidForm form then
+                                    performRequest
+                                        ClickedSave
+                                        (Saving balances sale RemoteData.NotAsked form)
+                                        loggedIn
+                                        "updatesale"
+                                        (encodeUpdateForm sale form community.symbol)
+
+                                else
+                                    validatedModel
+                                        |> UR.init
+
+                            _ ->
+                                validatedModel |> UR.init
 
                     _ ->
                         validatedModel
@@ -819,32 +786,47 @@ update msg model loggedIn =
                     |> UR.addExt (RequiredAuthentication (Just ClickedSave))
 
         ClickedDelete ->
-            if LoggedIn.isAuth loggedIn then
-                case model.status of
-                    EditingUpdate balances sale (Uploaded hash) form ->
+            case model of
+                EditingUpdate balances sale imageStatus _ form ->
+                    EditingUpdate balances sale imageStatus Open form
+                        |> UR.init
+
+                _ ->
+                    UR.init model
+
+        ClickedDeleteCancel ->
+            case model of
+                EditingUpdate balances sale imageStatus _ form ->
+                    EditingUpdate balances sale imageStatus Closed form
+                        |> UR.init
+
+                _ ->
+                    UR.init model
+
+        ClickedDeleteConfirm ->
+            if LoggedIn.hasPrivateKey loggedIn then
+                case model of
+                    EditingUpdate balances sale (RemoteData.Success url) _ form ->
                         performRequest
-                            ClickedDelete
-                            model
-                            (Deleting balances sale (Uploaded hash) form)
-                            loggedIn.accountName
+                            ClickedDeleteConfirm
+                            (Deleting balances sale (RemoteData.Success url) form)
+                            loggedIn
                             "deletesale"
                             (encodeDeleteForm sale)
 
-                    EditingUpdate balances sale (UploadFailed error) form ->
+                    EditingUpdate balances sale (RemoteData.Failure error) _ form ->
                         performRequest
-                            ClickedDelete
-                            model
-                            (Deleting balances sale (UploadFailed error) form)
-                            loggedIn.accountName
+                            ClickedDeleteConfirm
+                            (Deleting balances sale (RemoteData.Failure error) form)
+                            loggedIn
                             "deletesale"
                             (encodeDeleteForm sale)
 
-                    EditingUpdate balances sale NoImage form ->
+                    EditingUpdate balances sale RemoteData.NotAsked _ form ->
                         performRequest
-                            ClickedDelete
-                            model
-                            (Deleting balances sale NoImage form)
-                            loggedIn.accountName
+                            ClickedDeleteConfirm
+                            (Deleting balances sale RemoteData.NotAsked form)
+                            loggedIn
                             "deletesale"
                             (encodeDeleteForm sale)
 
@@ -856,22 +838,22 @@ update msg model loggedIn =
             else
                 model
                     |> UR.init
-                    |> UR.addExt (RequiredAuthentication (Just ClickedDelete))
+                    |> UR.addExt (RequiredAuthentication (Just ClickedDeleteConfirm))
 
         GotSaveResponse (Ok _) ->
             UR.init model
                 |> UR.addCmd
                     (Route.replaceUrl loggedIn.shared.navKey (Route.Shop Shop.All))
+                |> UR.addExt (ShowFeedback Feedback.Success (t "shop.create_offer_success"))
 
         GotSaveResponse (Err error) ->
             let
                 internalError =
-                    I18Next.t loggedIn.shared.translations "error.unknown"
+                    loggedIn.shared.translators.t "error.unknown"
             in
-            case model.status of
+            case model of
                 Creating balances imageStatus form ->
-                    model
-                        |> updateStatus (EditingCreate balances imageStatus form)
+                    EditingCreate balances imageStatus form
                         |> updateForm
                             (\form_ ->
                                 { form_
@@ -882,8 +864,7 @@ update msg model loggedIn =
                         |> UR.logDebugValue msg error
 
                 Saving balances sale imageStatus form ->
-                    model
-                        |> updateStatus (EditingUpdate balances sale imageStatus form)
+                    EditingUpdate balances sale imageStatus Closed form
                         |> updateForm
                             (\form_ ->
                                 { form_
@@ -903,16 +884,16 @@ update msg model loggedIn =
                 |> UR.init
                 |> UR.addCmd
                     (Route.replaceUrl loggedIn.shared.navKey (Route.Shop Shop.All))
+                |> UR.addExt (ShowFeedback Feedback.Success (t "shop.delete_offer_success"))
 
         GotDeleteResponse (Err error) ->
             let
                 internalError =
-                    I18Next.t loggedIn.shared.translations "error.unknown"
+                    loggedIn.shared.translators.t "error.unknown"
             in
-            case model.status of
+            case model of
                 Deleting balances sale imageStatus form ->
-                    model
-                        |> updateStatus (EditingUpdate balances sale imageStatus form)
+                    EditingUpdate balances sale imageStatus Closed form
                         |> updateForm
                             (\form_ ->
                                 { form_
@@ -927,72 +908,59 @@ update msg model loggedIn =
                         |> UR.init
                         |> UR.logImpossible msg []
 
+        PressedEnter val ->
+            if val then
+                UR.init model
+                    |> UR.addCmd
+                        (Task.succeed ClickedSave
+                            |> Task.perform identity
+                        )
 
-performRequest : Msg -> Model -> Status -> Eos.Name -> String -> Value -> UpdateResult
-performRequest msg model status account action data =
-    model
-        |> updateStatus status
+            else
+                UR.init model
+
+
+performRequest : Msg -> Status -> LoggedIn.Model -> String -> Value -> UpdateResult
+performRequest msg status { shared, accountName } action data =
+    status
         |> UR.init
         |> UR.addPort
             { responseAddress = msg
             , responseData = Encode.null
             , data =
                 Eos.encodeTransaction
-                    { actions =
-                        [ { accountName = "bes.cmm"
-                          , name = action
-                          , authorization =
-                                { actor = account
-                                , permissionName = Eos.samplePermission
-                                }
-                          , data = data
-                          }
-                        ]
-                    }
+                    [ { accountName = shared.contracts.community
+                      , name = action
+                      , authorization =
+                            { actor = accountName
+                            , permissionName = Eos.samplePermission
+                            }
+                      , data = data
+                      }
+                    ]
             }
 
 
 updateForm : (Form -> Form) -> Model -> Model
 updateForm transform model =
-    let
-        status =
-            case model.status of
-                LoadingBalancesCreate ->
-                    model.status
+    case model of
+        EditingCreate balances imageStatus form ->
+            EditingCreate balances imageStatus (transform form)
 
-                LoadingBalancesUpdate _ ->
-                    model.status
+        Creating balances imageStatus form ->
+            Creating balances imageStatus (transform form)
 
-                LoadingSaleUpdate _ _ ->
-                    model.status
+        EditingUpdate balances sale imageStatus confirmDelete form ->
+            EditingUpdate balances sale imageStatus confirmDelete (transform form)
 
-                LoadBalancesFailed _ ->
-                    model.status
+        Saving balances sale imageStatus form ->
+            Saving balances sale imageStatus (transform form)
 
-                LoadSaleFailed _ ->
-                    model.status
+        Deleting balances sale imageStatus form ->
+            Deleting balances sale imageStatus (transform form)
 
-                EditingCreate balances imageStatus form ->
-                    EditingCreate balances imageStatus (transform form)
-
-                Creating balances imageStatus form ->
-                    Creating balances imageStatus (transform form)
-
-                EditingUpdate balances sale imageStatus form ->
-                    EditingUpdate balances sale imageStatus (transform form)
-
-                Saving balances sale imageStatus form ->
-                    Saving balances sale imageStatus (transform form)
-
-                Deleting balances sale imageStatus form ->
-                    Deleting balances sale imageStatus (transform form)
-    in
-    { model | status = status }
-
-
-updateStatus : Status -> Model -> Model
-updateStatus status model =
-    { model | status = status }
+        _ ->
+            model
 
 
 validateForm : Form -> Form
@@ -1001,7 +969,6 @@ validateForm form =
         | image = validate form.image
         , title = validate form.title
         , description = validate form.description
-        , symbol = validate form.symbol
         , trackStock = validate form.trackStock
         , units = validate form.units
         , price = validate form.price
@@ -1013,7 +980,6 @@ isValidForm form =
     hasErrors form.image
         || hasErrors form.title
         || hasErrors form.description
-        || hasErrors form.symbol
         || hasErrors form.trackStock
         || hasErrors form.units
         || hasErrors form.price
@@ -1040,14 +1006,11 @@ encodeCreateForm loggedIn form =
                 |> getInput
                 |> Encode.string
 
-        symbol =
-            getInput form.symbol
-
         price =
             String.toFloat (getInput form.price)
 
         quantity =
-            case Maybe.map2 (\p s -> Eos.Asset p s) price symbol of
+            case Maybe.map2 (\p c -> Eos.Asset p c.symbol) price (RemoteData.toMaybe loggedIn.selectedCommunity) of
                 Nothing ->
                     Encode.string ""
 
@@ -1066,12 +1029,16 @@ encodeCreateForm loggedIn form =
                     |> Eos.encodeEosBool
 
         units =
-            case String.toInt (getInput form.units) of
-                Nothing ->
-                    Encode.int 0
+            if getInput form.trackStock == Just trackYes then
+                case String.toInt (getInput form.units) of
+                    Nothing ->
+                        Encode.int 0
 
-                Just units_ ->
-                    Encode.int units_
+                    Just units_ ->
+                        Encode.int units_
+
+            else
+                Encode.int 0
     in
     Encode.object
         [ ( "from", creator )
@@ -1084,11 +1051,11 @@ encodeCreateForm loggedIn form =
         ]
 
 
-encodeUpdateForm : Sale -> Form -> Value
-encodeUpdateForm sale form =
+encodeUpdateForm : Product -> Form -> Symbol -> Value
+encodeUpdateForm product form selectedCommunity =
     let
         saleId =
-            Encode.int sale.id
+            Encode.int product.id
 
         image =
             Maybe.withDefault "" (getInput form.image)
@@ -1104,14 +1071,11 @@ encodeUpdateForm sale form =
                 |> getInput
                 |> Encode.string
 
-        symbol =
-            getInput form.symbol
-
         price =
             String.toFloat (getInput form.price)
 
         quantity =
-            case Maybe.map2 Eos.Asset price symbol of
+            case Maybe.map2 Eos.Asset price (Just selectedCommunity) of
                 Nothing ->
                     Encode.string ""
 
@@ -1150,17 +1114,13 @@ encodeUpdateForm sale form =
 
 getNumericValues : String -> String
 getNumericValues value =
-    value
-        |> String.toList
-        |> List.filter Char.isDigit
-        |> List.map String.fromChar
-        |> String.join ""
+    String.filter Char.isDigit value
 
 
-encodeDeleteForm : Sale -> Value
-encodeDeleteForm sale =
+encodeDeleteForm : Product -> Value
+encodeDeleteForm product =
     Encode.object
-        [ ( "sale_id", Encode.int sale.id )
+        [ ( "sale_id", Encode.int product.id )
         ]
 
 
@@ -1179,7 +1139,7 @@ jsAddressToMsg addr val =
                 |> Result.map (Just << GotSaveResponse)
                 |> Result.withDefault Nothing
 
-        "ClickedDelete" :: [] ->
+        "ClickedDeleteConfirm" :: [] ->
             Decode.decodeValue
                 (Decode.oneOf
                     [ Decode.field "transactionId" Decode.string
@@ -1202,7 +1162,7 @@ msgToString msg =
             [ "CompletedBalancesLoad", UR.resultToString r ]
 
         CompletedSaleLoad r ->
-            [ "CompletedSaleLoad", UR.resultToString r ]
+            [ "CompletedSaleLoad", UR.remoteDataToString r ]
 
         CompletedImageUpload r ->
             [ "CompletedImageUpload", UR.resultToString r ]
@@ -1216,14 +1176,11 @@ msgToString msg =
         EnteredDescription _ ->
             [ "EnteredDescription" ]
 
-        EnteredSymbol _ ->
-            [ "EnteredSymbol" ]
-
         EnteredTrackStock _ ->
             [ "EnteredTrackStock" ]
 
         EnteredUnits _ ->
-            [ "EnteredUnit" ]
+            [ "EnteredUnits" ]
 
         EnteredPrice _ ->
             [ "EnteredPrice" ]
@@ -1234,8 +1191,17 @@ msgToString msg =
         ClickedDelete ->
             [ "ClickedDelete" ]
 
+        ClickedDeleteConfirm ->
+            [ "ClickedDeleteConfirm" ]
+
+        ClickedDeleteCancel ->
+            [ "ClickedDeleteCancel" ]
+
         GotSaveResponse r ->
             [ "GotSaveResponse", UR.resultToString r ]
 
         GotDeleteResponse r ->
             [ "GotDeleteResponse", UR.resultToString r ]
+
+        PressedEnter _ ->
+            [ "PressedEnter" ]

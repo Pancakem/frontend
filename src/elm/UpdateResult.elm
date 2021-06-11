@@ -2,7 +2,7 @@ module UpdateResult exposing
     ( UpdateResult
     , addCmd
     , addExt
-    , addLog
+    , addMsg
     , addPort
     , init
     , logDebugValue
@@ -12,6 +12,7 @@ module UpdateResult exposing
     , logImpossible
     , map
     , mapModel
+    , remoteDataToString
     , resultToString
     , setModel
     , toModelCmd
@@ -26,7 +27,7 @@ module UpdateResult exposing
    @docs UpdateResult
 
    # Common Helpers
-   @docs init, addCmd, addExt, addPort, addLog, logHttpError, logImpossible, logGraphqlError, toModelCmd
+   @docs init, addCmd, addMsg, addExt, addPort,  logHttpError, logImpossible, logGraphqlError, toModelCmd
 
    # Mapping UpdateResults
    @docs map, mapModel, setModel
@@ -36,9 +37,11 @@ module UpdateResult exposing
 import Graphql.Http
 import Http
 import Json.Decode as Decode
-import Json.Encode as Encode exposing (Value)
+import Json.Encode exposing (Value)
 import Log exposing (Log)
 import Ports
+import RemoteData exposing (RemoteData(..))
+import Task
 
 
 {-| Core data structure that enables this project to have an observable update function in our module.
@@ -158,6 +161,14 @@ addCmd cmd uResult =
     { uResult | cmds = uResult.cmds ++ [ cmd ] }
 
 
+{-| Add a msg to the list of msgs in an UpdateResult, useful to reduce duplication,
+like when performing multiple requests that produce the same msg
+-}
+addMsg : msg -> UpdateResult m msg eMsg -> UpdateResult m msg eMsg
+addMsg msg uResult =
+    { uResult | cmds = uResult.cmds ++ [ Task.succeed () |> Task.perform (\_ -> msg) ] }
+
+
 {-| Adds an external command to the list of commands in an UpdateResult, this is uselful when needing
 commands from another module, such as checking if a particular auth mechanism is present or asking a user
 to sign a transaction
@@ -240,3 +251,21 @@ resultToString r =
 
         Err _ ->
             "Err"
+
+
+{-| Converts a RemoteData Dataset into a string usable by UpdateResult
+-}
+remoteDataToString : RemoteData e a -> String
+remoteDataToString r =
+    case r of
+        NotAsked ->
+            "NotAsked"
+
+        Loading ->
+            "Loading"
+
+        Success _ ->
+            "Success"
+
+        Failure _ ->
+            "Failure"

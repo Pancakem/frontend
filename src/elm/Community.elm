@@ -1,76 +1,61 @@
 module Community exposing
-    ( Action
-    , ActionVerification
-    , ActionVerificationsResponse
-    , Balance
-    , ClaimResponse
-    , Community
+    ( Balance
+    , CommunityPreview
     , CreateCommunityData
-    , CreateTokenData
-    , DashboardInfo
+    , Invite
     , Metadata
+    , Model
     , Objective
-    , Transaction
-    , Verification(..)
-    , Verifiers
-    , WithObjectives
-    , claimSelectionSet
-    , communitiesQuery
-    , communityQuery
+    , addPhotosMutation
+    , communityPreviewImage
+    , communityPreviewQuery
+    , communityPreviewSymbolQuery
     , createCommunityData
+    , createCommunityDataDecoder
     , decodeBalance
-    , decodeTransaction
-    , encodeClaimAction
-    , encodeCreateActionAction
+    , domainAvailableQuery
     , encodeCreateCommunityData
     , encodeCreateObjectiveAction
-    , encodeCreateTokenData
-    , encodeUpdateLogoData
+    , encodeUpdateData
     , encodeUpdateObjectiveAction
+    , inviteQuery
+    , isNonExistingCommunityError
     , logoBackground
-    , logoTitleQuery
-    , logoUrl
     , newCommunitySubscription
-    , toVerifications
+    , subdomainQuery
+    , symbolQuery
     )
 
-import Api.Relay exposing (MetadataConnection, PaginationArgs)
-import Cambiatus.Enum.VerificationType exposing (VerificationType(..))
+import Action exposing (Action)
+import Cambiatus.Mutation as Mutation
 import Cambiatus.Object
-import Cambiatus.Object.Action as Action
-import Cambiatus.Object.Check as Check
-import Cambiatus.Object.Claim as Claim exposing (ChecksOptionalArguments)
 import Cambiatus.Object.Community as Community
+import Cambiatus.Object.CommunityPreview as CommunityPreview
+import Cambiatus.Object.Exists
+import Cambiatus.Object.Invite as Invite
 import Cambiatus.Object.Objective as Objective
+import Cambiatus.Object.Subdomain as Subdomain
+import Cambiatus.Object.Upload as Upload
+import Cambiatus.Object.User as Profile
 import Cambiatus.Query as Query
 import Cambiatus.Scalar exposing (DateTime(..))
 import Cambiatus.Subscription as Subscription
-import Eos exposing (EosBool(..), Symbol, symbolToString)
+import Eos
 import Eos.Account as Eos
-import Graphql.Operation exposing (RootQuery, RootSubscription)
+import Graphql.Http
+import Graphql.Operation exposing (RootMutation, RootQuery, RootSubscription)
 import Graphql.OptionalArgument exposing (OptionalArgument(..))
 import Graphql.SelectionSet as SelectionSet exposing (SelectionSet, with)
-import Html
-import Html.Attributes
-import Json.Decode as Decode exposing (Decoder, string)
-import Json.Decode.Pipeline as Decode exposing (required)
+import Html exposing (Html, div, img, span, text)
+import Html.Attributes exposing (class, classList, src)
+import Json.Decode as Decode exposing (Decoder)
+import Json.Decode.Pipeline exposing (required)
 import Json.Encode as Encode exposing (Value)
-import Profile exposing (Profile)
+import Profile
+import Session.Shared exposing (Shared)
 import Time exposing (Posix)
-import Transfer exposing (ConnectionTransfer, metadataConnectionSelectionSet, transferConnectionSelectionSet)
+import Token
 import Utils
-import View.Tag as Tag
-
-
-
--- DashboardInfo for Dashboard
-
-
-type alias DashboardInfo =
-    { title : String
-    , logo : String
-    , members : List Profile
-    }
 
 
 
@@ -81,10 +66,9 @@ type alias DashboardInfo =
 type alias Metadata =
     { title : String
     , description : String
-    , symbol : Symbol
+    , symbol : Eos.Symbol
     , logo : String
     , creator : Eos.Name
-    , transfers : Maybe MetadataConnection
     , memberCount : Int
     }
 
@@ -93,18 +77,33 @@ type alias Metadata =
 -- Community Data
 
 
-type alias Community =
-    { title : String
+type alias Model =
+    { name : String
     , description : String
-    , symbol : Symbol
+    , symbol : Eos.Symbol
     , logo : String
+    , subdomain : String
     , creator : Eos.Name
     , inviterReward : Float
     , invitedReward : Float
+    , minBalance : Maybe Float
+    , maxSupply : Maybe Float
+    , tokenType : Maybe Token.TokenType
     , memberCount : Int
-    , members : List Profile
-    , transfers : Maybe ConnectionTransfer
+    , actionCount : Int
+    , claimCount : Int
+    , transferCount : Int
+    , productCount : Int
+    , orderCount : Int
+    , members : List Profile.Minimal
     , objectives : List Objective
+    , hasObjectives : Bool
+    , hasShop : Bool
+    , hasKyc : Bool
+    , hasAutoInvite : Bool
+    , validators : List Eos.Name
+    , uploads : List String
+    , website : Maybe String
     }
 
 
@@ -112,61 +111,46 @@ type alias Community =
 -- GraphQL
 
 
-communitiesSelectionSet : (PaginationArgs -> PaginationArgs) -> SelectionSet Metadata Cambiatus.Object.Community
-communitiesSelectionSet paginateArgs =
+communitiesSelectionSet : SelectionSet Metadata Cambiatus.Object.Community
+communitiesSelectionSet =
     SelectionSet.succeed Metadata
         |> with Community.name
         |> with Community.description
         |> with (Eos.symbolSelectionSet Community.symbol)
         |> with Community.logo
         |> with (Eos.nameSelectionSet Community.creator)
-        |> with
-            (Community.transfers
-                paginateArgs
-                metadataConnectionSelectionSet
-            )
         |> with Community.memberCount
 
 
-dashboardSelectionSet : SelectionSet DashboardInfo Cambiatus.Object.Community
-dashboardSelectionSet =
-    SelectionSet.succeed DashboardInfo
-        |> with Community.name
-        |> with Community.logo
-        |> with (Community.members Profile.selectionSet)
-
-
-communitySelectionSet : (PaginationArgs -> PaginationArgs) -> SelectionSet Community Cambiatus.Object.Community
-communitySelectionSet paginateArgs =
-    SelectionSet.succeed Community
+communitySelectionSet : SelectionSet Model Cambiatus.Object.Community
+communitySelectionSet =
+    SelectionSet.succeed Model
         |> with Community.name
         |> with Community.description
         |> with (Eos.symbolSelectionSet Community.symbol)
         |> with Community.logo
+        |> with (Community.subdomain Subdomain.name |> SelectionSet.map (Maybe.withDefault ""))
         |> with (Eos.nameSelectionSet Community.creator)
         |> with Community.inviterReward
         |> with Community.invitedReward
+        |> with Community.minBalance
+        |> with Community.maxSupply
+        |> with Token.tokenTypeSelectionSet
         |> with Community.memberCount
-        |> with (Community.members Profile.selectionSet)
-        |> with
-            (Community.transfers
-                paginateArgs
-                transferConnectionSelectionSet
-            )
+        |> with Community.actionCount
+        |> with Community.claimCount
+        |> with Community.transferCount
+        |> with Community.productCount
+        |> with Community.orderCount
+        |> with (Community.members Profile.minimalSelectionSet)
         |> with (Community.objectives objectiveSelectionSet)
-
-
-
--- Communities Query
-
-
-communitiesQuery : SelectionSet (List Metadata) RootQuery
-communitiesQuery =
-    communitiesSelectionSet
-        (\args ->
-            { args | first = Present 0 }
-        )
-        |> Query.communities
+        |> with Community.hasObjectives
+        |> with Community.hasShop
+        |> with Community.hasKyc
+        |> with Community.autoInvite
+        |> with (Community.validators (Eos.nameSelectionSet Profile.account))
+        |> with (Community.uploads Upload.url)
+        |> with Community.website
 
 
 
@@ -174,19 +158,18 @@ communitiesQuery =
 
 
 type alias NewCommunity =
-    { title : String }
+    String
 
 
-newCommunitySubscription : Symbol -> SelectionSet NewCommunity RootSubscription
+newCommunitySubscription : Eos.Symbol -> SelectionSet NewCommunity RootSubscription
 newCommunitySubscription symbol =
     let
         stringSymbol =
-            symbolToString symbol
+            Eos.symbolToString symbol
                 |> String.toUpper
 
         selectionSet =
-            SelectionSet.succeed NewCommunity
-                |> with Community.name
+            Community.name
 
         args =
             { input = { symbol = stringSymbol } }
@@ -194,49 +177,44 @@ newCommunitySubscription symbol =
     Subscription.newcommunity args selectionSet
 
 
-logoTitleQuery : Symbol -> SelectionSet (Maybe DashboardInfo) RootQuery
-logoTitleQuery symbol =
-    Query.community { symbol = symbolToString symbol } <| dashboardSelectionSet
+symbolQuery : Eos.Symbol -> SelectionSet (Maybe Model) RootQuery
+symbolQuery symbol =
+    Query.community (\optionals -> { optionals | symbol = Present <| Eos.symbolToString symbol }) communitySelectionSet
 
 
-type alias WithObjectives =
-    { metadata : Metadata
-    , objectives : List Objective
-    }
+subdomainQuery : String -> SelectionSet (Maybe Model) RootQuery
+subdomainQuery subdomain =
+    Query.community (\optionals -> { optionals | subdomain = Present subdomain }) communitySelectionSet
 
 
-communityQuery : Symbol -> SelectionSet (Maybe Community) RootQuery
-communityQuery symbol =
-    Query.community { symbol = symbolToString symbol } <|
-        communitySelectionSet
-            (\args ->
-                { args | first = Present 10 }
-            )
-
-
-logoUrl : String -> Maybe String -> String
-logoUrl ipfsUrl maybeHash =
-    case maybeHash of
+logoUrl : Maybe String -> String
+logoUrl maybeUrl =
+    let
+        logoPlaceholder =
+            "/icons/community_placeholder.png"
+    in
+    case maybeUrl of
         Nothing ->
-            logoPlaceholder ipfsUrl
+            logoPlaceholder
 
-        Just hash ->
-            if String.isEmpty (String.trim hash) then
-                logoPlaceholder ipfsUrl
+        Just url ->
+            if String.isEmpty (String.trim url) then
+                logoPlaceholder
 
             else
-                ipfsUrl ++ "/" ++ hash
+                url
 
 
-logoBackground : String -> Maybe String -> Html.Attribute msg
-logoBackground ipfsUrl maybeHash =
+logoBackground : Maybe String -> Html.Attribute msg
+logoBackground maybeUrl =
     Html.Attributes.style "background-image"
-        ("url(" ++ logoUrl ipfsUrl maybeHash ++ ")")
+        ("url(" ++ logoUrl maybeUrl ++ ")")
 
 
-logoPlaceholder : String -> String
-logoPlaceholder ipfsUrl =
-    ipfsUrl ++ "/QmXuf6y8TMGRN96HZEy86c8N9aDseaeyuCQ5qVLqPyd8Ld"
+addPhotosMutation : Eos.Symbol -> List String -> SelectionSet (Maybe Model) RootMutation
+addPhotosMutation symbol photos =
+    Mutation.addCommunityPhotos { symbol = Eos.symbolToString symbol, urls = photos }
+        communitySelectionSet
 
 
 
@@ -248,6 +226,8 @@ type alias Objective =
     , description : String
     , creator : Eos.Name
     , actions : List Action
+    , community : Metadata
+    , isCompleted : Bool
     }
 
 
@@ -257,11 +237,13 @@ objectiveSelectionSet =
         |> with Objective.id
         |> with Objective.description
         |> with (Eos.nameSelectionSet Objective.creatorId)
-        |> with (Objective.actions identity actionSelectionSet)
+        |> with (Objective.actions identity Action.selectionSet)
+        |> with (Objective.community communitiesSelectionSet)
+        |> with Objective.isCompleted
 
 
 type alias CreateObjectiveAction =
-    { symbol : Symbol
+    { asset : Eos.Asset
     , description : String
     , creator : Eos.Name
     }
@@ -270,7 +252,7 @@ type alias CreateObjectiveAction =
 encodeCreateObjectiveAction : CreateObjectiveAction -> Value
 encodeCreateObjectiveAction c =
     Encode.object
-        [ ( "cmm_asset", Encode.string ("0 " ++ Eos.symbolToString c.symbol) )
+        [ ( "cmm_asset", Eos.encodeAsset c.asset )
         , ( "description", Encode.string c.description )
         , ( "creator", Eos.encodeName c.creator )
         ]
@@ -293,112 +275,6 @@ encodeUpdateObjectiveAction c =
 
 
 
--- ACTION
-
-
-type alias Action =
-    { id : Int
-    , description : String
-    , reward : Float
-    , verificationReward : Float
-    , creator : Eos.Name
-    , validators : List Profile
-    , usages : Int
-    , usagesLeft : Int
-    , deadline : Maybe DateTime
-    , verificationType : VerificationType
-    , verifications : Int
-    , isCompleted : Bool
-    }
-
-
-actionSelectionSet : SelectionSet Action Cambiatus.Object.Action
-actionSelectionSet =
-    SelectionSet.succeed Action
-        |> with Action.id
-        |> with Action.description
-        |> with Action.reward
-        |> with Action.verifierReward
-        |> with (Eos.nameSelectionSet Action.creatorId)
-        |> with (Action.validators Profile.selectionSet)
-        |> with Action.usages
-        |> with Action.usagesLeft
-        |> with Action.deadline
-        |> with Action.verificationType
-        |> with Action.verifications
-        |> with Action.isCompleted
-
-
-type Verification
-    = Manually Verifiers
-    | Automatically String
-
-
-type alias Verifiers =
-    { verifiers : List String
-    , reward : Float
-    }
-
-
-
----- ACTION CREATE
-
-
-type alias CreateActionAction =
-    { actionId : Int
-    , objectiveId : Int
-    , description : String
-    , reward : String
-    , verifierReward : String
-    , deadline : Int
-    , usages : String
-    , usagesLeft : String
-    , verifications : String
-    , verificationType : String
-    , validatorsStr : String
-    , isCompleted : Int
-    , creator : Eos.Name
-    }
-
-
-encodeCreateActionAction : CreateActionAction -> Value
-encodeCreateActionAction c =
-    Encode.object
-        [ ( "action_id", Encode.int c.actionId )
-        , ( "objective_id", Encode.int c.objectiveId )
-        , ( "description", Encode.string c.description )
-        , ( "reward", Encode.string c.reward )
-        , ( "verifier_reward", Encode.string c.verifierReward )
-        , ( "deadline", Encode.int c.deadline )
-        , ( "usages", Encode.string c.usages )
-        , ( "usages_left", Encode.string c.usagesLeft )
-        , ( "verifications", Encode.string c.verifications )
-        , ( "verification_type", Encode.string c.verificationType )
-        , ( "validators_str", Encode.string c.validatorsStr )
-        , ( "is_completed", Encode.int c.isCompleted )
-        , ( "creator", Eos.encodeName c.creator )
-        ]
-
-
-
--- Claim Action
-
-
-type alias ClaimAction =
-    { actionId : Int
-    , maker : Eos.Name
-    }
-
-
-encodeClaimAction : ClaimAction -> Value
-encodeClaimAction c =
-    Encode.object
-        [ ( "action_id", Encode.int c.actionId )
-        , ( "maker", Eos.encodeName c.maker )
-        ]
-
-
-
 -- Balance
 
 
@@ -416,47 +292,40 @@ decodeBalance =
 
 
 
--- Transaction
-
-
-type alias Transaction =
-    { id : String
-    , accountFrom : Eos.Name
-    , symbol : Eos.Symbol
-    }
-
-
-decodeTransaction : Decoder Transaction
-decodeTransaction =
-    Decode.succeed Transaction
-        |> required "txId" string
-        |> required "accountFrom" Eos.nameDecoder
-        |> required "symbol" Eos.symbolDecoder
-
-
-
 -- CREATE COMMUNITY
 
 
 type alias CreateCommunityData =
     { cmmAsset : Eos.Asset
     , creator : Eos.Name
-    , logoHash : String
+    , logoUrl : String
     , name : String
     , description : String
+    , subdomain : String
     , inviterReward : Eos.Asset
     , invitedReward : Eos.Asset
+    , hasShop : Eos.EosBool
+    , hasObjectives : Eos.EosBool
+    , hasKyc : Eos.EosBool
+    , hasAutoInvite : Eos.EosBool
+    , website : String
     }
 
 
 createCommunityData :
     { accountName : Eos.Name
     , symbol : Eos.Symbol
-    , logoHash : String
+    , logoUrl : String
     , name : String
     , description : String
+    , subdomain : String
     , inviterReward : Float
     , invitedReward : Float
+    , hasShop : Bool
+    , hasObjectives : Bool
+    , hasKyc : Bool
+    , hasAutoInvite : Bool
+    , website : String
     }
     -> CreateCommunityData
 createCommunityData params =
@@ -465,9 +334,10 @@ createCommunityData params =
         , symbol = params.symbol
         }
     , creator = params.accountName
-    , logoHash = params.logoHash
+    , logoUrl = params.logoUrl
     , name = params.name
     , description = params.description
+    , subdomain = params.subdomain
     , inviterReward =
         { amount = params.inviterReward
         , symbol = params.symbol
@@ -476,6 +346,11 @@ createCommunityData params =
         { amount = params.invitedReward
         , symbol = params.symbol
         }
+    , hasShop = params.hasShop |> Eos.boolToEosBool
+    , hasObjectives = params.hasObjectives |> Eos.boolToEosBool
+    , hasKyc = params.hasKyc |> Eos.boolToEosBool
+    , hasAutoInvite = params.hasAutoInvite |> Eos.boolToEosBool
+    , website = params.website
     }
 
 
@@ -484,30 +359,36 @@ encodeCreateCommunityData c =
     Encode.object
         [ ( "cmm_asset", Eos.encodeAsset c.cmmAsset )
         , ( "creator", Eos.encodeName c.creator )
-        , ( "logo", Encode.string c.logoHash )
+        , ( "logo", Encode.string c.logoUrl )
         , ( "name", Encode.string c.name )
         , ( "description", Encode.string c.description )
         , ( "inviter_reward", Eos.encodeAsset c.inviterReward )
         , ( "invited_reward", Eos.encodeAsset c.invitedReward )
+        , ( "has_objectives", Eos.encodeEosBool c.hasObjectives )
+        , ( "has_shop", Eos.encodeEosBool c.hasShop )
+        , ( "has_kyc", Eos.encodeEosBool c.hasKyc )
+        , ( "auto_invite", Eos.encodeEosBool c.hasAutoInvite )
+        , ( "subdomain", Encode.string c.subdomain )
+        , ( "website", Encode.string c.website )
         ]
 
 
-type alias CreateTokenData =
-    { creator : Eos.Name
-    , maxSupply : Eos.Asset
-    , minBalance : Eos.Asset
-    , tokenType : String
-    }
-
-
-encodeCreateTokenData : CreateTokenData -> Value
-encodeCreateTokenData c =
-    Encode.object
-        [ ( "issuer", Eos.encodeName c.creator )
-        , ( "max_supply", Eos.encodeAsset c.maxSupply )
-        , ( "min_balance", Eos.encodeAsset c.minBalance )
-        , ( "type", Encode.string c.tokenType )
-        ]
+createCommunityDataDecoder : Decoder CreateCommunityData
+createCommunityDataDecoder =
+    Decode.succeed CreateCommunityData
+        |> required "cmm_asset" Eos.decodeAsset
+        |> required "creator" Eos.nameDecoder
+        |> required "logo" Decode.string
+        |> required "name" Decode.string
+        |> required "description" Decode.string
+        |> required "subdomain" Decode.string
+        |> required "inviter_reward" Eos.decodeAsset
+        |> required "invited_reward" Eos.decodeAsset
+        |> required "has_objectives" Eos.eosBoolDecoder
+        |> required "has_shop" Eos.eosBoolDecoder
+        |> required "has_kyc" Eos.eosBoolDecoder
+        |> required "auto_invite" Eos.eosBoolDecoder
+        |> required "website" Decode.string
 
 
 type alias UpdateCommunityData =
@@ -515,158 +396,167 @@ type alias UpdateCommunityData =
     , logo : String
     , name : String
     , description : String
+    , subdomain : String
     , inviterReward : Eos.Asset
     , invitedReward : Eos.Asset
+    , hasObjectives : Eos.EosBool
+    , hasShop : Eos.EosBool
+    , hasKyc : Eos.EosBool
+    , hasAutoInvite : Eos.EosBool
+    , website : String
     }
 
 
-encodeUpdateLogoData : UpdateCommunityData -> Value
-encodeUpdateLogoData c =
+encodeUpdateData : UpdateCommunityData -> Value
+encodeUpdateData c =
     Encode.object
         [ ( "logo", Encode.string c.logo )
         , ( "cmm_asset", Eos.encodeAsset c.asset )
         , ( "name", Encode.string c.name )
         , ( "description", Encode.string c.description )
+        , ( "subdomain", Encode.string c.subdomain )
         , ( "inviter_reward", Eos.encodeAsset c.inviterReward )
         , ( "invited_reward", Eos.encodeAsset c.invitedReward )
+        , ( "has_objectives", Eos.encodeEosBool c.hasObjectives )
+        , ( "has_shop", Eos.encodeEosBool c.hasShop )
+        , ( "has_kyc", Eos.encodeEosBool c.hasKyc )
+        , ( "auto_invite", Eos.encodeEosBool c.hasAutoInvite )
+        , ( "website", Encode.string c.website )
         ]
 
 
+domainAvailableSelectionSet : SelectionSet Bool Cambiatus.Object.Exists
+domainAvailableSelectionSet =
+    Cambiatus.Object.Exists.exists
+        |> SelectionSet.map (Maybe.withDefault False)
 
--- Action Verification
+
+domainAvailableQuery : String -> SelectionSet Bool RootQuery
+domainAvailableQuery domain =
+    Query.domainAvailable { domain = domain } domainAvailableSelectionSet
+        |> SelectionSet.map (Maybe.map not >> Maybe.withDefault False)
 
 
-type alias ActionVerification =
-    { symbol : Maybe Symbol
-    , logo : String
-    , objectiveId : Int
-    , actionId : Int
-    , claimId : Int
+
+-- INVITE
+
+
+type alias Invite =
+    { community : CommunityPreview
+    , creator : Profile.Minimal
+    }
+
+
+inviteSelectionSet : SelectionSet Invite Cambiatus.Object.Invite
+inviteSelectionSet =
+    SelectionSet.succeed Invite
+        |> with (Invite.communityPreview communityPreviewSelectionSet)
+        |> with (Invite.creator Profile.minimalSelectionSet)
+
+
+inviteQuery : String -> SelectionSet (Maybe Invite) RootQuery
+inviteQuery invitationId =
+    Query.invite { id = invitationId } inviteSelectionSet
+
+
+
+-- PREVIEW
+
+
+type alias CommunityPreview =
+    { name : String
     , description : String
-    , createdAt : DateTime
-    , status : Tag.TagStatus
-    }
-
-
-type alias ActionVerificationsResponse =
-    { claims : List ClaimResponse }
-
-
-type alias ClaimResponse =
-    { id : Int
-    , createdAt : DateTime
-    , checks : List CheckResponse
-    , action : ActionResponse
-    }
-
-
-type alias CheckResponse =
-    { isVerified : Bool
-    }
-
-
-type alias ActionResponse =
-    { id : Int
-    , description : String
-    , objective : ObjectiveResponse
-    }
-
-
-type alias ObjectiveResponse =
-    { id : Int
-    , community : CommunityResponse
-    }
-
-
-type alias CommunityResponse =
-    { symbol : String
     , logo : String
+    , symbol : Eos.Symbol
+    , subdomain : String
+    , hasShop : Bool
+    , hasObjectives : Bool
+    , hasKyc : Bool
+    , hasAutoInvite : Bool
+    , uploads : List String
+    , memberCount : Int
+    , website : Maybe String
     }
 
 
+communityPreviewSelectionSet : SelectionSet CommunityPreview Cambiatus.Object.CommunityPreview
+communityPreviewSelectionSet =
+    SelectionSet.succeed CommunityPreview
+        |> with CommunityPreview.name
+        |> with CommunityPreview.description
+        |> with CommunityPreview.logo
+        |> with (Eos.symbolSelectionSet CommunityPreview.symbol)
+        |> with (CommunityPreview.subdomain Subdomain.name |> SelectionSet.map (Maybe.withDefault ""))
+        |> with CommunityPreview.hasShop
+        |> with CommunityPreview.hasObjectives
+        |> with CommunityPreview.hasKyc
+        |> with CommunityPreview.autoInvite
+        |> with (CommunityPreview.uploads Upload.url)
+        |> with CommunityPreview.memberCount
+        |> with CommunityPreview.website
 
--- Verifications SelectionSets
+
+communityPreviewQuery : String -> SelectionSet (Maybe CommunityPreview) RootQuery
+communityPreviewQuery subdomain =
+    Query.communityPreview (\optionals -> { optionals | subdomain = Present subdomain })
+        communityPreviewSelectionSet
 
 
-claimSelectionSet : String -> SelectionSet ClaimResponse Cambiatus.Object.Claim
-claimSelectionSet validator =
+communityPreviewSymbolQuery : Eos.Symbol -> SelectionSet (Maybe CommunityPreview) RootQuery
+communityPreviewSymbolQuery symbol =
+    Query.communityPreview (\optionals -> { optionals | symbol = Present (Eos.symbolToString symbol) })
+        communityPreviewSelectionSet
+
+
+communityPreviewImage :
+    Bool
+    -> Shared
+    -> { community | name : String, uploads : List String, memberCount : Int }
+    -> Html msg
+communityPreviewImage isLeftSide { translators } community =
     let
-        checksArg : ChecksOptionalArguments -> ChecksOptionalArguments
-        checksArg _ =
-            { input = Present { validator = Present validator }
-            }
+        defaultImage =
+            if isLeftSide then
+                "/images/community-bg-desktop.svg"
+
+            else
+                "/images/community-bg-mobile.svg"
     in
-    SelectionSet.succeed ClaimResponse
-        |> with Claim.id
-        |> with Claim.createdAt
-        |> with (Claim.checks checksArg checkSelectionSet)
-        |> with (Claim.action verificationActionSelectionSet)
+    div
+        [ class "relative"
+        , classList
+            [ ( "md:hidden w-full", not isLeftSide )
+            , ( "w-1/2 flex-grow hidden md:block", isLeftSide )
+            ]
+        ]
+        [ div [ class "bg-black" ]
+            [ img
+                [ class "w-full opacity-60"
+                , classList
+                    [ ( "h-screen object-cover", isLeftSide )
+                    , ( "max-h-108", not isLeftSide )
+                    ]
+                , src
+                    (List.head community.uploads
+                        |> Maybe.withDefault defaultImage
+                    )
+                ]
+                []
+            ]
+        , div [ class "absolute inset-0 flex flex-col items-center justify-center text-white uppercase px-5" ]
+            [ span [ class "font-medium text-xl" ] [ text community.name ]
+            , span [ class "text-xs mt-2" ]
+                [ text
+                    (translators.tr "community.join.member_count"
+                        [ ( "member_count", String.fromInt community.memberCount ) ]
+                    )
+                ]
+            ]
+        ]
 
 
-checkSelectionSet : SelectionSet CheckResponse Cambiatus.Object.Check
-checkSelectionSet =
-    SelectionSet.succeed CheckResponse
-        |> with Check.isVerified
-
-
-verificationActionSelectionSet : SelectionSet ActionResponse Cambiatus.Object.Action
-verificationActionSelectionSet =
-    SelectionSet.succeed ActionResponse
-        |> with Action.id
-        |> with Action.description
-        |> with (Action.objective verificationObjectiveSelectionSet)
-
-
-verificationObjectiveSelectionSet : SelectionSet ObjectiveResponse Cambiatus.Object.Objective
-verificationObjectiveSelectionSet =
-    SelectionSet.succeed ObjectiveResponse
-        |> with Objective.id
-        |> with (Objective.community verificationCommunitySelectionSet)
-
-
-verificationCommunitySelectionSet : SelectionSet CommunityResponse Cambiatus.Object.Community
-verificationCommunitySelectionSet =
-    SelectionSet.succeed CommunityResponse
-        |> with Community.symbol
-        |> with Community.logo
-
-
-
--- convert claims response to verification
-
-
-toVerifications : ActionVerificationsResponse -> List ActionVerification
-toVerifications actionVerificationResponse =
-    let
-        claimsResponse : List ClaimResponse
-        claimsResponse =
-            actionVerificationResponse.claims
-
-        toStatus : List CheckResponse -> Tag.TagStatus
-        toStatus checks =
-            case List.head checks of
-                Just check ->
-                    if check.isVerified == True then
-                        Tag.APPROVED
-
-                    else
-                        Tag.DISAPPROVED
-
-                Nothing ->
-                    Tag.PENDING
-
-        toVerification : ClaimResponse -> ActionVerification
-        toVerification claimResponse =
-            { symbol = Eos.symbolFromString claimResponse.action.objective.community.symbol
-            , logo = claimResponse.action.objective.community.logo
-            , objectiveId = claimResponse.action.objective.id
-            , actionId = claimResponse.action.id
-            , claimId = claimResponse.id
-            , description = claimResponse.action.description
-            , createdAt = claimResponse.createdAt
-            , status = toStatus claimResponse.checks
-            }
-    in
-    List.map
-        toVerification
-        claimsResponse
+isNonExistingCommunityError : Graphql.Http.Error community -> Bool
+isNonExistingCommunityError error =
+    Utils.errorToString error
+        |> String.toLower
+        |> String.contains "no community found using the domain"
