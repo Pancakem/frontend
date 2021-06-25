@@ -34,7 +34,6 @@ import List.Extra as List
 import Page
 import Profile
 import Profile.Contact as Contact
-import Profile.Summary
 import RemoteData exposing (RemoteData)
 import Route
 import Session.LoggedIn as LoggedIn
@@ -72,7 +71,7 @@ type alias Model =
     { balance : RemoteData Http.Error (Maybe Balance)
     , analysis : GraphqlStatus (Maybe Claim.Paginated) (List ClaimStatus)
     , analysisFilter : Direction
-    , profileSummaries : List Profile.Summary.Model
+    , profileSummaries : List Claim.ClaimProfileSummaries
     , lastSocket : String
     , transfers : GraphqlStatus (Maybe QueryTransfers) (List Transfer)
     , contactModel : Contact.Model
@@ -239,7 +238,7 @@ addContactModal shared ({ contactModel } as model) =
             , p [ class "text-caption text-center uppercase my-4" ]
                 [ text_ "contact_modal.footer" ]
             ]
-        |> Modal.withLarge True
+        |> Modal.withSize Modal.FullScreen
         |> Modal.toHtml
 
 
@@ -382,7 +381,7 @@ viewAnalysisList loggedIn model =
                 [ div
                     [ class "w-full" ]
                     [ div [ class "flex justify-between text-gray-600 text-2xl font-light flex mt-4 mb-4" ]
-                        [ div [ class "flex" ]
+                        [ div [ class "flex-wrap md:flex" ]
                             [ div [ class "text-indigo-500 mr-2 font-medium" ]
                                 [ text_ "dashboard.analysis.title.1"
                                 ]
@@ -458,11 +457,11 @@ viewVoteConfirmationModal loggedIn { claimModalStatus } =
             text ""
 
 
-viewAnalysis : LoggedIn.Model -> Profile.Summary.Model -> Int -> ClaimStatus -> Html Msg
-viewAnalysis loggedIn profileSummary claimIndex claimStatus =
+viewAnalysis : LoggedIn.Model -> Claim.ClaimProfileSummaries -> Int -> ClaimStatus -> Html Msg
+viewAnalysis loggedIn profileSummaries claimIndex claimStatus =
     case claimStatus of
         ClaimLoaded claim ->
-            Claim.viewClaimCard loggedIn profileSummary claim
+            Claim.viewClaimCard loggedIn profileSummaries claim
                 |> Html.map (ClaimMsg claimIndex)
 
         ClaimLoading _ ->
@@ -475,7 +474,7 @@ viewAnalysis loggedIn profileSummary claimIndex claimStatus =
             text ""
 
         ClaimVoteFailed claim ->
-            Claim.viewClaimCard loggedIn profileSummary claim
+            Claim.viewClaimCard loggedIn profileSummaries claim
                 |> Html.map (ClaimMsg claimIndex)
 
 
@@ -691,6 +690,7 @@ type alias UpdateResult =
 
 type Msg
     = NoOp
+    | ClosedAuthModal
     | CompletedLoadCommunity Community.Model
     | CompletedLoadProfile Profile.Model
     | CompletedLoadBalance (Result Http.Error (Maybe Balance))
@@ -714,6 +714,10 @@ update msg model ({ shared, accountName } as loggedIn) =
     case msg of
         NoOp ->
             UR.init model
+
+        ClosedAuthModal ->
+            { model | claimModalStatus = Claim.Closed }
+                |> UR.init
 
         CompletedLoadCommunity community ->
             UR.init
@@ -749,8 +753,7 @@ update msg model ({ shared, accountName } as loggedIn) =
                     List.map ClaimLoaded (Claim.paginatedToList claims)
 
                 initProfileSummaries cs =
-                    List.length cs
-                        |> Profile.Summary.initMany False
+                    List.map (unwrapClaimStatus >> Claim.initClaimProfileSummaries) cs
             in
             case model.analysis of
                 LoadedGraphql existingClaims _ ->
@@ -789,20 +792,10 @@ update msg model ({ shared, accountName } as loggedIn) =
 
         ClaimMsg claimIndex m ->
             let
-                claimCmd =
-                    case m of
-                        Claim.RouteOpened r ->
-                            Route.replaceUrl loggedIn.shared.navKey r
-
-                        _ ->
-                            Cmd.none
-
                 updatedProfileSummaries =
                     case m of
-                        Claim.GotProfileSummaryMsg subMsg ->
-                            List.updateAt claimIndex
-                                (Profile.Summary.update subMsg)
-                                model.profileSummaries
+                        Claim.GotExternalMsg subMsg ->
+                            List.updateAt claimIndex (Claim.updateProfileSummaries subMsg) model.profileSummaries
 
                         _ ->
                             model.profileSummaries
@@ -810,7 +803,6 @@ update msg model ({ shared, accountName } as loggedIn) =
             { model | profileSummaries = updatedProfileSummaries }
                 |> Claim.updateClaimModalStatus m
                 |> UR.init
-                |> UR.addCmd claimCmd
 
         VoteClaim claimId vote ->
             case model.analysis of
@@ -825,27 +817,25 @@ update msg model ({ shared, accountName } as loggedIn) =
                                 , claimModalStatus = Claim.Closed
                             }
                     in
-                    if LoggedIn.hasPrivateKey loggedIn then
-                        UR.init newModel
-                            |> UR.addPort
-                                { responseAddress = msg
-                                , responseData = Encode.null
-                                , data =
-                                    Eos.encodeTransaction
-                                        [ { accountName = loggedIn.shared.contracts.community
-                                          , name = "verifyclaim"
-                                          , authorization =
-                                                { actor = loggedIn.accountName
-                                                , permissionName = Eos.samplePermission
-                                                }
-                                          , data = Claim.encodeVerification claimId loggedIn.accountName vote
-                                          }
-                                        ]
-                                }
-
-                    else
-                        UR.init newModel
-                            |> UR.addExt (Just (VoteClaim claimId vote) |> LoggedIn.RequiredAuthentication)
+                    UR.init newModel
+                        |> UR.addPort
+                            { responseAddress = msg
+                            , responseData = Encode.null
+                            , data =
+                                Eos.encodeTransaction
+                                    [ { accountName = loggedIn.shared.contracts.community
+                                      , name = "verifyclaim"
+                                      , authorization =
+                                            { actor = loggedIn.accountName
+                                            , permissionName = Eos.samplePermission
+                                            }
+                                      , data = Claim.encodeVerification claimId loggedIn.accountName vote
+                                      }
+                                    ]
+                            }
+                        |> LoggedIn.withAuthentication loggedIn
+                            model
+                            { successMsg = msg, errorMsg = ClosedAuthModal }
 
                 _ ->
                     model
@@ -904,7 +894,14 @@ update msg model ({ shared, accountName } as loggedIn) =
             in
             case model.analysis of
                 LoadedGraphql claims pageInfo ->
-                    { model | analysis = LoadedGraphql (setClaimStatus claims claimId ClaimVoteFailed) pageInfo }
+                    let
+                        updateShowClaimModal profileSummary =
+                            { profileSummary | showClaimModal = False }
+                    in
+                    { model
+                        | analysis = LoadedGraphql (setClaimStatus claims claimId ClaimVoteFailed) pageInfo
+                        , profileSummaries = List.map updateShowClaimModal model.profileSummaries
+                    }
                         |> UR.init
                         |> UR.addExt (LoggedIn.ShowFeedback Feedback.Failure errorMessage)
 
@@ -1209,6 +1206,9 @@ msgToString msg =
     case msg of
         NoOp ->
             [ "NoOp" ]
+
+        ClosedAuthModal ->
+            [ "ClosedAuthModal" ]
 
         CompletedLoadCommunity _ ->
             [ "CompletedLoadCommunity" ]

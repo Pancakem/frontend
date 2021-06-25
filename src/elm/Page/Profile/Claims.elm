@@ -27,7 +27,6 @@ import Json.Decode as Decode exposing (Value)
 import Json.Encode as Encode
 import List.Extra as List
 import Page
-import Profile.Summary
 import RemoteData exposing (RemoteData)
 import Route
 import Session.LoggedIn as LoggedIn exposing (External(..))
@@ -59,7 +58,7 @@ initModel account =
 
 type Status
     = Loading
-    | Loaded (List Profile.Summary.Model) ProfileClaims
+    | Loaded (List Claim.ClaimProfileSummaries) ProfileClaims
     | NotFound
     | Failed (Graphql.Http.Error (Maybe ProfileClaims))
 
@@ -100,7 +99,7 @@ view loggedIn model =
     { title = pageTitle, content = content }
 
 
-viewResults : LoggedIn.Model -> List Profile.Summary.Model -> List Claim.Model -> Html Msg
+viewResults : LoggedIn.Model -> List Claim.ClaimProfileSummaries -> List Claim.Model -> Html Msg
 viewResults loggedIn profileSummaries claims =
     let
         viewClaim profileSummary claimIndex claim =
@@ -174,6 +173,7 @@ type alias UpdateResult =
 
 type Msg
     = ClaimsLoaded (RemoteData (Graphql.Http.Error (Maybe ProfileClaims)) (Maybe ProfileClaims))
+    | ClosedAuthModal
     | CompletedLoadCommunity Community.Model
     | ClaimMsg Int Claim.Msg
     | VoteClaim Claim.ClaimId Bool
@@ -188,8 +188,7 @@ update msg model loggedIn =
                 Just claims ->
                     let
                         profileSummaries =
-                            List.length claims
-                                |> Profile.Summary.initMany False
+                            List.map Claim.initClaimProfileSummaries claims
                     in
                     { model | status = Loaded profileSummaries (List.reverse claims) }
                         |> UR.init
@@ -205,30 +204,23 @@ update msg model loggedIn =
         ClaimsLoaded _ ->
             UR.init model
 
+        ClosedAuthModal ->
+            { model | claimModalStatus = Claim.Closed }
+                |> UR.init
+
         CompletedLoadCommunity community ->
             UR.init model
                 |> UR.addCmd (profileClaimQuery loggedIn model.accountString community)
 
         ClaimMsg claimIndex m ->
             let
-                claimCmd =
-                    case m of
-                        Claim.RouteOpened r ->
-                            Route.replaceUrl loggedIn.shared.navKey r
-
-                        _ ->
-                            Cmd.none
-
                 updatedModel =
                     case ( model.status, m ) of
-                        ( Loaded profileSummaries profileClaims, Claim.GotProfileSummaryMsg subMsg ) ->
+                        ( Loaded profileSummaries profileClaims, Claim.GotExternalMsg subMsg ) ->
                             { model
                                 | status =
                                     Loaded
-                                        (List.updateAt claimIndex
-                                            (Profile.Summary.update subMsg)
-                                            profileSummaries
-                                        )
+                                        (List.updateAt claimIndex (Claim.updateProfileSummaries subMsg) profileSummaries)
                                         profileClaims
                             }
 
@@ -238,7 +230,6 @@ update msg model loggedIn =
             updatedModel
                 |> Claim.updateClaimModalStatus m
                 |> UR.init
-                |> UR.addCmd claimCmd
 
         VoteClaim claimId vote ->
             case model.status of
@@ -249,27 +240,25 @@ update msg model loggedIn =
                                 | claimModalStatus = Claim.Loading claimId vote
                             }
                     in
-                    if LoggedIn.hasPrivateKey loggedIn then
-                        UR.init newModel
-                            |> UR.addPort
-                                { responseAddress = msg
-                                , responseData = Encode.null
-                                , data =
-                                    Eos.encodeTransaction
-                                        [ { accountName = loggedIn.shared.contracts.community
-                                          , name = "verifyclaim"
-                                          , authorization =
-                                                { actor = loggedIn.accountName
-                                                , permissionName = Eos.samplePermission
-                                                }
-                                          , data = Claim.encodeVerification claimId loggedIn.accountName vote
-                                          }
-                                        ]
-                                }
-
-                    else
-                        UR.init newModel
-                            |> UR.addExt (Just (VoteClaim claimId vote) |> LoggedIn.RequiredAuthentication)
+                    UR.init newModel
+                        |> UR.addPort
+                            { responseAddress = msg
+                            , responseData = Encode.null
+                            , data =
+                                Eos.encodeTransaction
+                                    [ { accountName = loggedIn.shared.contracts.community
+                                      , name = "verifyclaim"
+                                      , authorization =
+                                            { actor = loggedIn.accountName
+                                            , permissionName = Eos.samplePermission
+                                            }
+                                      , data = Claim.encodeVerification claimId loggedIn.accountName vote
+                                      }
+                                    ]
+                            }
+                        |> LoggedIn.withAuthentication loggedIn
+                            model
+                            { successMsg = msg, errorMsg = ClosedAuthModal }
 
                 _ ->
                     model
@@ -314,8 +303,12 @@ update msg model loggedIn =
             in
             case model.status of
                 Loaded profileSummaries claims ->
+                    let
+                        updateShowClaimModal profileSummary =
+                            { profileSummary | showClaimModal = False }
+                    in
                     { model
-                        | status = Loaded profileSummaries claims
+                        | status = Loaded (List.map updateShowClaimModal profileSummaries) claims
                         , claimModalStatus = Claim.Closed
                     }
                         |> UR.init
@@ -378,6 +371,9 @@ msgToString msg =
     case msg of
         ClaimsLoaded r ->
             [ "ClaimsLoaded", UR.remoteDataToString r ]
+
+        ClosedAuthModal ->
+            [ "ClosedAuthModal" ]
 
         CompletedLoadCommunity _ ->
             [ "CompletedLoadCommunity" ]
